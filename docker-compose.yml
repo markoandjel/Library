@@ -1,0 +1,47 @@
+﻿services:
+  library:
+    build:
+      context: ./backend
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      ASPNETCORE_URLS: http://+:${APP_INTERNAL_PORT:-8080}
+      TMPDIR: /var/lib/library-imports
+      ConnectionStrings__Library: Server=database;Port=${MYSQL_PORT:-3306};Database=${MYSQL_DATABASE:-library};User ID=${MYSQL_USER:-library};Password=${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env};Character Set=utf8mb4;Allow User Variables=true;
+      Sftp__Host: ${SFTP_HOST:?Set SFTP_HOST in .env}
+      Sftp__Port: ${SFTP_PORT:-22}
+      Sftp__Username: ${SFTP_USERNAME:?Set SFTP_USERNAME in .env}
+      Sftp__Password: ${SFTP_PASSWORD:?Set SFTP_PASSWORD in .env}
+      Sftp__BasePath: ${SFTP_BASE_PATH:-/data/Slike/}
+      Sftp__BasePathOrmani: ${SFTP_CABINETS_PATH:-/data/Ormani/}
+    volumes:
+      - library-imports:/var/lib/library-imports
+    ports:
+      - "${APP_PORT:-5098}:${APP_INTERNAL_PORT:-8080}"
+    depends_on:
+      database:
+        condition: service_healthy
+    restart: unless-stopped
+
+  database:
+    image: mysql:8.4
+    command: --lower-case-table-names=1 --port=${MYSQL_PORT:-3306}
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-library}
+      MYSQL_USER: ${MYSQL_USER:-library}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes:
+      - library-data:/var/lib/mysql
+      - ./dump-library-202607251656.sql:/docker-entrypoint-initdb.d/01-dump-library.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -P ${MYSQL_PORT:-3306} -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  library-data:
+  library-imports:
+

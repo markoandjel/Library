@@ -1,0 +1,632 @@
+@page "/ormani"
+@inject Db Db
+@inject SftpImageService Images
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+@using System.Globalization
+@using System.Net
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.JSInterop
+@using MudBlazor
+@implements IAsyncDisposable
+
+<PageTitle>Ormani</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="ormani-shell">
+    <div class="ormani-header">
+        <div>
+            <MudText Typo="Typo.h4" Class="ormani-title">Ormani</MudText>
+            <MudText Class="ormani-subtitle">Pregled polica za izabrani orman.</MudText>
+        </div>
+        <div class="ormani-actions">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="ormani-add-button" StartIcon="@Icons.Material.Filled.Add" OnClick="StartNewCabinet"><span class="ormani-add-text">Novi orman</span></MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="ormani-edit-button" StartIcon="@Icons.Material.Filled.Edit"><span class="ormani-edit-text">Uredi orman</span></MudButton>
+        </div>
+    </div>
+
+    @if (_loading)
+    {
+        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
+    }
+    else if (_cabinets.Count == 0)
+    {
+        <MudPaper Class="ormani-empty" Elevation="1">
+            <MudText Typo="Typo.h5">Nema ormana</MudText>
+            <MudText>Dodajte orman da bi se prikazale police.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <div class="ormani-layout">
+            <MudPaper Class="ormani-picker-card" Elevation="1">
+                @if (_createMode)
+                {
+                    <div class="ormani-form">
+                        <label class="ormani-field">
+                            <span>Naziv:</span>
+                            <input class="library-input ormani-select" value="@_newCabinetName" @oninput="args => _newCabinetName = StringValue(args)" />
+                        </label>
+                        <label class="ormani-upload">
+                            <span>Slika:</span>
+                            <InputFile OnChange="OnCabinetFileSelected" accept=".png,.jpg,.jpeg,image/png,image/jpeg" />
+                        </label>
+                        @if (!string.IsNullOrWhiteSpace(_createMessage))
+                        {
+                            <MudText Class="ormani-form-message">@_createMessage</MudText>
+                        }
+                        <div class="ormani-form-actions">
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" Class="ormani-save-button" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveNewCabinet">Sačuvaj</MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="ormani-cancel-button" StartIcon="@Icons.Material.Filled.Visibility" OnClick="CancelNewCabinet">Pregled</MudButton>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <label class="ormani-field">
+                        <span>Orman:</span>
+                        <select class="library-input ormani-select" value="@_selectedCabinetId" @onchange="ChangeCabinet">
+                            @foreach (var cabinet in _cabinets)
+                            {
+                                <option value="@cabinet.Id">@cabinet.Name</option>
+                            }
+                        </select>
+                    </label>
+                }
+
+                <div class="ormani-map-card">
+                    @if (_createMode && !string.IsNullOrWhiteSpace(_previewImageUrl))
+                    {
+                        <img class="ormani-create-preview" src="@_previewImageUrl" alt="@_newCabinetName" />
+                    }
+                    else
+                    {
+                    <div class="shelf-map ormani-map cabinet-ratio-map">
+                        @if (!_cabinetImageVisible)
+                        {
+                            <div class="shelf-loading">
+                                <MudProgressCircular Class="shelf-progress" Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+                            </div>
+                        }
+
+                        @if (_cabinetImageRequested && _selectedCabinetId is not null)
+                        {
+                            <img class="cabinet-image @(_cabinetImageVisible ? "loaded" : "")" src="@SelectedCabinetImageUrl" alt="@SelectedCabinetName" @onload="OnCabinetImageLoaded" @onerror="OnCabinetImageLoaded" />
+                        }
+
+                        @if (_cabinetImageVisible)
+                        {
+                            @foreach (var shelf in _shelves)
+                            {
+                                <span class="shelf-marker ormani-marker" style="@ShelfStyle(shelf)" title="Polica @shelf.Id">
+                                    @shelf.Id
+                                </span>
+                            }
+                        }
+                    </div>
+                    }
+                    @if (_createMode && !string.IsNullOrWhiteSpace(_newCabinetName))
+                    {
+                        <MudText Class="cabinet-caption">@_newCabinetName</MudText>
+                    }
+                    else if (_cabinetImageVisible)
+                    {
+                        <MudText Class="cabinet-caption">@SelectedCabinetName</MudText>
+                    }
+                </div>
+            </MudPaper>
+
+            @if (_createMode)
+            {
+                <MudPaper Class="ormani-designer-card" Elevation="1">
+                    <div class="ormani-table-header">
+                        <div>
+                            <MudText Typo="Typo.h5" Class="ormani-table-title">Novi orman</MudText>
+                            <MudText Class="ormani-subtitle">Dodajte i pomerajte police preko slike.</MudText>
+                        </div>
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="ormani-add-shelf-button" StartIcon="@Icons.Material.Filled.Add" Disabled="@(string.IsNullOrWhiteSpace(_previewImageUrl))" OnClick="AddDraftShelf">Dodaj policu</MudButton>
+                    </div>
+                    <div class="ormani-designer-stage">
+                        @if (string.IsNullOrWhiteSpace(_previewImageUrl))
+                        {
+                            <div class="ormani-designer-empty">Otpremite PNG, JPG ili JPEG sliku ormana.</div>
+                        }
+                        else
+                        {
+                            <div class="shelf-map ormani-map ormani-designer-map" data-orman-designer data-base-height="@_designerBaseHeight" style="@DesignerMapStyle">
+                                <img class="cabinet-image loaded" src="@_previewImageUrl" alt="@_newCabinetName" />
+                                @foreach (var shelf in _draftShelves)
+                                {
+                                    <button class="shelf-marker ormani-marker ormani-designer-marker"
+                                            type="button"
+                                            data-shelf-id="@shelf.Id"
+                                            style="@DraftShelfStyle(shelf)"
+                                            title="Polica @shelf.Id">
+                                        @shelf.Id
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+                </MudPaper>
+            }
+            else
+            {
+            <MudPaper Class="ormani-table-card" Elevation="1">
+                <div class="ormani-table-header">
+                    <div>
+                        <MudText Typo="Typo.h5" Class="ormani-table-title">@SelectedCabinetName</MudText>
+                        <MudText Class="ormani-subtitle">Police u ormanu</MudText>
+                    </div>
+                    <span class="ormani-count-badge">BROJ POLICA: @_shelves.Count</span>
+                </div>
+
+                <div class="ormani-table-wrap">
+                    <table class="ormani-table">
+                        <thead>
+                            <tr>
+                                <th>
+                                    <button class="police-sort-button ormani-sort-button" type="button" @onclick='() => SortShelvesBy("id")'>
+                                        ID
+                                        @SortIcon("id")
+                                    </button>
+                                </th>
+                                <th>
+                                    <button class="police-sort-button ormani-sort-button" type="button" @onclick='() => SortShelvesBy("x")'>
+                                        X
+                                        @SortIcon("x")
+                                    </button>
+                                </th>
+                                <th>
+                                    <button class="police-sort-button ormani-sort-button" type="button" @onclick='() => SortShelvesBy("y")'>
+                                        Y
+                                        @SortIcon("y")
+                                    </button>
+                                </th>
+                                <th>
+                                    <button class="police-sort-button ormani-sort-button" type="button" @onclick='() => SortShelvesBy("books")'>
+                                        Broj knjiga
+                                        @SortIcon("books")
+                                    </button>
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @if (_shelves.Count == 0)
+                            {
+                                <tr>
+                                    <td colspan="4" class="ormani-empty-row">Izabrani orman nema police.</td>
+                                </tr>
+                            }
+                            else
+                            {
+                                @foreach (var shelf in PagedShelves)
+                                {
+                                    <tr>
+                                        <td>@shelf.Id</td>
+                                        <td>@shelf.X</td>
+                                        <td>@shelf.Y</td>
+                                        <td>@shelf.BookCount</td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div class="police-pager ormani-pager">
+                    <button type="button" disabled="@(_shelfPage == 1)" @onclick="PreviousShelfPage" aria-label="Prethodna strana">
+                        <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+                    </button>
+                    <span>@_shelfPage / @ShelfPageCount</span>
+                    <button type="button" disabled="@(_shelfPage >= ShelfPageCount)" @onclick="NextShelfPage" aria-label="Sledeca strana">
+                        <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                    </button>
+                </div>
+            </MudPaper>
+            }
+        </div>
+    }
+</MudContainer>
+
+@code {
+    private List<CabinetChoice> _cabinets = [];
+    private List<ShelfInfo> _shelves = [];
+    private int? _selectedCabinetId;
+    private int _shelfPage = 1;
+    private bool _loading = true;
+    private bool _cabinetImageRequested;
+    private bool _cabinetImageVisible;
+    private DateTime _cabinetLoadingStartedAt;
+    private string _sortColumn = "id";
+    private bool _sortAscending = true;
+    private bool _createMode;
+    private string _newCabinetName = "";
+    private string _createMessage = "";
+    private string? _previewImageUrl;
+    private string? _uploadedExtension;
+    private byte[]? _uploadedImageBytes;
+    private int _designerBaseHeight = 225;
+    private List<DraftShelf> _draftShelves = [];
+    private DotNetObjectReference<Ormani>? _dotNetRef;
+    private const int ShelfPageSize = 10;
+
+    private string SelectedCabinetName => _cabinets.FirstOrDefault(cabinet => cabinet.Id == _selectedCabinetId)?.Name ?? "";
+    private string SelectedCabinetImageUrl => _selectedCabinetId is null ? "" : $"/cabinet-image/{_selectedCabinetId}";
+    private int ShelfPageCount => Math.Max(1, (int)Math.Ceiling(_shelves.Count / (double)ShelfPageSize));
+    private IEnumerable<ShelfInfo> PagedShelves => SortedShelves().Skip((_shelfPage - 1) * ShelfPageSize).Take(ShelfPageSize);
+    private string DesignerMapStyle
+    {
+        get
+        {
+            var width = Math.Min(500d, 400d * 300d / Math.Max(1, _designerBaseHeight));
+            return $"aspect-ratio: 300 / {_designerBaseHeight}; width: min({width.ToString("0.###", CultureInfo.InvariantCulture)}px, 100%);";
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("ormanDesigner.register", _dotNetRef);
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cabinets = await LoadCabinets();
+        _selectedCabinetId = _cabinets.FirstOrDefault()?.Id;
+        await LoadShelvesForSelectedCabinet();
+        _loading = false;
+        await QueueCabinetImageLoad();
+    }
+
+    private async Task SelectCabinet(int cabinetId)
+    {
+        if (_selectedCabinetId == cabinetId)
+        {
+            return;
+        }
+
+        _selectedCabinetId = cabinetId;
+        _shelfPage = 1;
+        await LoadShelvesForSelectedCabinet();
+        await QueueCabinetImageLoad();
+    }
+
+    private async Task ChangeCabinet(ChangeEventArgs args)
+    {
+        if (!int.TryParse(Convert.ToString(args.Value, CultureInfo.InvariantCulture), NumberStyles.Integer, CultureInfo.InvariantCulture, out var cabinetId))
+        {
+            return;
+        }
+
+        await SelectCabinet(cabinetId);
+    }
+
+    private void PreviousShelfPage()
+    {
+        _shelfPage = Math.Max(1, _shelfPage - 1);
+    }
+
+    private void NextShelfPage()
+    {
+        _shelfPage = Math.Min(ShelfPageCount, _shelfPage + 1);
+    }
+
+    private void SortShelvesBy(string column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortAscending = !_sortAscending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+
+        _shelfPage = 1;
+    }
+
+    private void StartNewCabinet()
+    {
+        _createMode = true;
+        _newCabinetName = "";
+        _createMessage = "";
+        _previewImageUrl = null;
+        _uploadedExtension = null;
+        _uploadedImageBytes = null;
+        _designerBaseHeight = 225;
+        _draftShelves = [];
+    }
+
+    private async Task CancelNewCabinet()
+    {
+        _createMode = false;
+        _createMessage = "";
+        await QueueCabinetImageLoad();
+    }
+
+    private async Task OnCabinetFileSelected(InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+        if (extension is not ".png" and not ".jpg" and not ".jpeg")
+        {
+            _createMessage = "Slika mora biti PNG, JPG ili JPEG.";
+            return;
+        }
+
+        await using var stream = file.OpenReadStream(15 * 1024 * 1024);
+        using var memory = new MemoryStream();
+        await stream.CopyToAsync(memory);
+        _uploadedImageBytes = memory.ToArray();
+        _uploadedExtension = extension;
+        _designerBaseHeight = ReadImageBaseHeight(_uploadedImageBytes) ?? 225;
+        _previewImageUrl = $"data:{ContentTypeFor(extension)};base64,{Convert.ToBase64String(_uploadedImageBytes)}";
+        _createMessage = "";
+    }
+
+    private async Task AddDraftShelf()
+    {
+        var existingIds = _draftShelves.Select(shelf => shelf.Id).ToHashSet();
+        var shelfId = await FindReusableShelfId(existingIds);
+        if (shelfId is null)
+        {
+            shelfId = await Db.InsertAsync(
+                "INSERT INTO polica (x, y, orman_id) VALUES (@x, @y, @orman_id)",
+                new { X = 150, Y = _designerBaseHeight / 2, OrmanId = (int?)null });
+        }
+
+        _draftShelves.Add(new DraftShelf(shelfId.Value, 150, _designerBaseHeight / 2));
+    }
+
+    private async Task<int?> FindReusableShelfId(HashSet<int> excludedIds)
+    {
+        var rows = await Db.QueryAsync("SELECT id FROM polica WHERE orman_id IS NULL ORDER BY id");
+        foreach (var row in rows)
+        {
+            var id = ToInt(row["id"]);
+            if (!excludedIds.Contains(id))
+            {
+                return id;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task SaveNewCabinet()
+    {
+        if (string.IsNullOrWhiteSpace(_newCabinetName))
+        {
+            _createMessage = "Unesite naziv ormana.";
+            return;
+        }
+
+        if (_uploadedImageBytes is null || _uploadedExtension is null)
+        {
+            _createMessage = "Otpremite sliku ormana.";
+            return;
+        }
+
+        var fileName = $"{Guid.NewGuid():N}{_uploadedExtension}";
+        if (!await Task.Run(() => Images.TryUploadCabinetImage(_uploadedImageBytes, fileName)))
+        {
+            _createMessage = "Slika nije mogla da se otpremi na SFTP.";
+            return;
+        }
+
+        var cabinetId = await Db.InsertAsync(
+            "INSERT INTO orman (naziv, transparentnost, slika) VALUES (@naziv, @transparentnost, @slika)",
+            new { Naziv = _newCabinetName.Trim(), Transparentnost = 100.0, Slika = fileName });
+
+        foreach (var shelf in _draftShelves)
+        {
+            await Db.ExecuteAsync(
+                "UPDATE polica SET x = @x, y = @y, orman_id = @orman_id WHERE id = @id",
+                new { shelf.X, shelf.Y, OrmanId = cabinetId, shelf.Id });
+        }
+
+        _createMode = false;
+        _cabinets = await LoadCabinets();
+        _selectedCabinetId = cabinetId;
+        _shelfPage = 1;
+        await LoadShelvesForSelectedCabinet();
+        await QueueCabinetImageLoad();
+        Snackbar.Add($"Orman id: {cabinetId} uspešno sačuvan", Severity.Success);
+    }
+
+    [JSInvokable]
+    public Task UpdateDraftShelfPosition(int shelfId, int x, int y)
+    {
+        var index = _draftShelves.FindIndex(shelf => shelf.Id == shelfId);
+        if (index >= 0)
+        {
+            _draftShelves[index] = _draftShelves[index] with
+            {
+                X = Math.Clamp(x, 0, 300),
+                Y = Math.Clamp(y, 0, _designerBaseHeight)
+            };
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task<List<CabinetChoice>> LoadCabinets()
+    {
+        var rows = await Db.QueryAsync("SELECT id, naziv FROM orman ORDER BY naziv, id");
+        return rows.Select(row => new CabinetChoice(
+            ToInt(row["id"]),
+            ToStringValue(row["naziv"]))).ToList();
+    }
+
+    private async Task LoadShelvesForSelectedCabinet()
+    {
+        if (_selectedCabinetId is null)
+        {
+            _shelves = [];
+            return;
+        }
+
+        var rows = await Db.QueryAsync(
+            @"SELECT p.id, p.x, p.y, COUNT(k.id) AS broj_knjiga
+              FROM polica p
+              LEFT JOIN knjiga k ON k.polica_id = p.id
+              WHERE p.orman_id = @orman_id
+              GROUP BY p.id, p.x, p.y
+              ORDER BY p.id",
+            new { OrmanId = _selectedCabinetId.Value });
+
+        _shelves = rows.Select(row => new ShelfInfo(
+            ToInt(row["id"]),
+            ToInt(row["x"]),
+            ToInt(row["y"]),
+            ToInt(row["broj_knjiga"]))).ToList();
+    }
+
+    private async Task OnCabinetImageLoaded()
+    {
+        var elapsed = DateTime.UtcNow - _cabinetLoadingStartedAt;
+        var remaining = TimeSpan.FromMilliseconds(900) - elapsed;
+        if (remaining > TimeSpan.Zero)
+        {
+            await Task.Delay(remaining);
+        }
+
+        _cabinetImageVisible = true;
+        await JS.InvokeVoidAsync("ormanDesigner.setAllMapRatios");
+    }
+
+    private async Task QueueCabinetImageLoad()
+    {
+        _cabinetImageVisible = false;
+        _cabinetImageRequested = false;
+        _cabinetLoadingStartedAt = DateTime.UtcNow;
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(150);
+        _cabinetImageRequested = _selectedCabinetId is not null;
+    }
+
+    private static int ToInt(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    private static string ToStringValue(object? value) => WebUtility.HtmlDecode(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
+    private static string ShelfStyle(ShelfInfo shelf)
+    {
+        return $"left: calc(var(--orman-scale, 1) * {shelf.X}px); top: calc(var(--orman-scale, 1) * {shelf.Y}px);";
+    }
+
+    private string DraftShelfStyle(DraftShelf shelf)
+    {
+        return $"left: calc(var(--orman-scale, 1) * {shelf.X}px); top: calc(var(--orman-scale, 1) * {shelf.Y}px);";
+    }
+
+    private List<ShelfInfo> SortedShelves()
+    {
+        IEnumerable<ShelfInfo> sorted = _sortColumn switch
+        {
+            "x" => _sortAscending ? _shelves.OrderBy(shelf => shelf.X).ThenBy(shelf => shelf.Id) : _shelves.OrderByDescending(shelf => shelf.X).ThenBy(shelf => shelf.Id),
+            "y" => _sortAscending ? _shelves.OrderBy(shelf => shelf.Y).ThenBy(shelf => shelf.Id) : _shelves.OrderByDescending(shelf => shelf.Y).ThenBy(shelf => shelf.Id),
+            "books" => _sortAscending ? _shelves.OrderBy(shelf => shelf.BookCount).ThenBy(shelf => shelf.Id) : _shelves.OrderByDescending(shelf => shelf.BookCount).ThenBy(shelf => shelf.Id),
+            _ => _sortAscending ? _shelves.OrderBy(shelf => shelf.Id) : _shelves.OrderByDescending(shelf => shelf.Id)
+        };
+
+        return sorted.ToList();
+    }
+
+    private RenderFragment SortIcon(string column) => builder =>
+    {
+        if (_sortColumn != column)
+        {
+            builder.OpenComponent<MudIcon>(0);
+            builder.AddAttribute(1, "Icon", Icons.Material.Filled.UnfoldMore);
+            builder.AddAttribute(2, "Class", "police-sort-icon muted");
+            builder.CloseComponent();
+            return;
+        }
+
+        builder.OpenComponent<MudIcon>(3);
+        builder.AddAttribute(4, "Icon", _sortAscending ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward);
+        builder.AddAttribute(5, "Class", "police-sort-icon active");
+        builder.CloseComponent();
+    };
+
+    private static string StringValue(ChangeEventArgs args) => Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+
+    private static string ContentTypeFor(string extension) => extension switch
+    {
+        ".jpg" or ".jpeg" => "image/jpeg",
+        _ => "image/png"
+    };
+
+    private static int? ReadImageBaseHeight(byte[] bytes)
+    {
+        var size = ReadPngSize(bytes) ?? ReadJpegSize(bytes);
+        return size is null || size.Value.Width <= 0
+            ? null
+            : Math.Max(1, (int)Math.Round(300d * size.Value.Height / size.Value.Width));
+    }
+
+    private static (int Width, int Height)? ReadPngSize(byte[] bytes)
+    {
+        if (bytes.Length < 24 || bytes[0] != 0x89 || bytes[1] != 0x50 || bytes[2] != 0x4E || bytes[3] != 0x47)
+        {
+            return null;
+        }
+
+        var width = ReadBigEndianInt(bytes, 16);
+        var height = ReadBigEndianInt(bytes, 20);
+        return (width, height);
+    }
+
+    private static (int Width, int Height)? ReadJpegSize(byte[] bytes)
+    {
+        if (bytes.Length < 4 || bytes[0] != 0xFF || bytes[1] != 0xD8)
+        {
+            return null;
+        }
+
+        var index = 2;
+        while (index + 9 < bytes.Length)
+        {
+            if (bytes[index] != 0xFF)
+            {
+                index++;
+                continue;
+            }
+
+            var marker = bytes[index + 1];
+            var length = (bytes[index + 2] << 8) + bytes[index + 3];
+            if (length < 2 || index + 2 + length > bytes.Length)
+            {
+                return null;
+            }
+
+            if (marker is >= 0xC0 and <= 0xC3 or >= 0xC5 and <= 0xC7 or >= 0xC9 and <= 0xCB or >= 0xCD and <= 0xCF)
+            {
+                var height = (bytes[index + 5] << 8) + bytes[index + 6];
+                var width = (bytes[index + 7] << 8) + bytes[index + 8];
+                return (width, height);
+            }
+
+            index += 2 + length;
+        }
+
+        return null;
+    }
+
+    private static int ReadBigEndianInt(byte[] bytes, int start) =>
+        (bytes[start] << 24) + (bytes[start + 1] << 16) + (bytes[start + 2] << 8) + bytes[start + 3];
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_dotNetRef is not null)
+        {
+            await JS.InvokeVoidAsync("ormanDesigner.unregister");
+            _dotNetRef.Dispose();
+        }
+    }
+
+    private sealed record CabinetChoice(int Id, string Name);
+    private sealed record ShelfInfo(int Id, int X, int Y, int BookCount);
+    private sealed record DraftShelf(int Id, int X, int Y);
+}

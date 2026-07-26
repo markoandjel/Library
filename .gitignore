@@ -1,0 +1,31 @@
+﻿# Environment files and secrets
+.env
+.env.*
+!.env.example
+backend/.env
+
+# .NET build output
+**/bin/
+**/obj/
+
+# Runtime output
+*.log
+runtime*.log
+
+# Python caches and virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE and OS metadata
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local database backups
+backups/
+*.bak
+.initial_data/

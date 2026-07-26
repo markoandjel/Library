@@ -1,0 +1,704 @@
+@page "/police"
+@inject Db Db
+@inject IJSRuntime JS
+@using System.Globalization
+@using System.Net
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.JSInterop
+@using MudBlazor
+
+<PageTitle>Police</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="police-shell">
+    @if (_loading)
+    {
+        <div class="police-loading">
+            <MudProgressCircular Class="image-progress" Indeterminate="true" />
+        </div>
+    }
+    else if (_cabinets.Count == 0)
+    {
+        <MudPaper Class="police-empty" Elevation="1">
+            <MudText Typo="Typo.h5">Nema ormana</MudText>
+            <MudText>Dodajte orman i police da bi se prikazale knjige.</MudText>
+        </MudPaper>
+    }
+    else
+    {
+        <div class="police-layout">
+            <MudPaper Class="police-side-card" Elevation="1">
+                <div class="police-side-header">
+                    <div>
+                        <MudText Class="police-eyebrow">Orman</MudText>
+                        <MudText Typo="Typo.h4" Class="police-title">@SelectedCabinetName</MudText>
+                    </div>
+                    <span class="police-books-badge">BROJ KNJIGA: @_books.Count</span>
+                </div>
+
+                <label class="police-field">
+                    <span>Orman:</span>
+                    <select class="library-input police-select" value="@_selectedCabinetId" @onchange="ChangeCabinet">
+                        @foreach (var cabinet in _cabinets)
+                        {
+                            <option value="@cabinet.Id">@cabinet.Name</option>
+                        }
+                    </select>
+                </label>
+
+                <div class="police-map-card">
+                    <div class="shelf-map police-map cabinet-ratio-map">
+                        @if (!_cabinetImageVisible)
+                        {
+                            <div class="shelf-loading">
+                                <MudProgressCircular Class="shelf-progress" Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+                            </div>
+                        }
+
+                        @if (_cabinetImageRequested && _selectedCabinetId is not null)
+                        {
+                            <img class="cabinet-image @(_cabinetImageVisible ? "loaded" : "")" src="@SelectedCabinetImageUrl" alt="@SelectedCabinetName" @onload="OnCabinetImageLoaded" @onerror="OnCabinetImageLoaded" />
+                        }
+
+                        @if (_cabinetImageVisible)
+                        {
+                            @foreach (var shelf in ShelvesForSelectedCabinet)
+                            {
+                                <button class="shelf-marker police-marker @(shelf.Id == _selectedShelfId ? "selected" : "")"
+                                        type="button"
+                                        style="@ShelfStyle(shelf)"
+                                        title="Polica @shelf.Id"
+                                        @onclick="() => SelectShelf(shelf.Id)">
+                                    @shelf.Id
+                                </button>
+                            }
+                        }
+                    </div>
+                    @if (_cabinetImageVisible)
+                    {
+                        <MudText Class="cabinet-caption">@SelectedCabinetName</MudText>
+                    }
+                </div>
+
+            </MudPaper>
+
+            <MudPaper Class="police-table-card" Elevation="1">
+                <div class="police-table-header">
+                    <div>
+                        <MudText Typo="Typo.h5" Class="police-table-title">Polica @_selectedShelfId</MudText>
+                        <MudText Class="police-table-subtitle">@SelectedCabinetName</MudText>
+                    </div>
+                    <div class="police-header-actions">
+                        @if (_editMode)
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Success" Class="police-save-button" StartIcon="@Icons.Material.Filled.Save" OnClick="SaveShelfChanges"><span class="police-action-text">Sačuvaj</span></MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="police-edit-button" StartIcon="@Icons.Material.Filled.Visibility" OnClick="CancelEditShelf"><span class="police-action-text">Pregled police</span></MudButton>
+                        }
+                        else
+                        {
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="police-edit-button" StartIcon="@Icons.Material.Filled.Edit" OnClick="EditShelf"><span class="police-action-text">Uredi policu</span></MudButton>
+                        }
+                    </div>
+                </div>
+
+                @if (_editMode)
+                {
+                    <div class="police-edit-panel">
+                        <label class="police-add-book">
+                            <span>Dodaj knjigu po ID:</span>
+                            <input class="library-input police-add-input" type="number" min="1" value="@_addBookId" @oninput="args => _addBookId = StringValue(args)" @onkeydown="HandleAddBookKeyDown" />
+                            <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="police-add-button" StartIcon="@Icons.Material.Filled.Add" OnClick="AddBookToEditShelf"><span class="police-add-text">Dodaj</span></MudButton>
+                            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="police-undo-button" StartIcon="@Icons.Material.Filled.Undo" Disabled="@(!CanUndoEdit)" OnClick="UndoShelfEdit"><span class="police-undo-text">Poništi</span></MudButton>
+                        </label>
+                        @if (!string.IsNullOrWhiteSpace(_editMessage))
+                        {
+                            <MudText Class="police-edit-message">@_editMessage</MudText>
+                        }
+                    </div>
+                    <div class="police-table-wrap">
+                        <table class="police-table police-edit-table">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Naslov knjige</th>
+                                    <th>Autori</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (_editBooks.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="4" class="police-empty-row">Nema knjiga na izabranoj polici.</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var book in PagedEditBooks)
+                                    {
+                                        <tr class="police-edit-row" @ontouchstart="args => StartBookSwipe(args, book.InventoryId)" @ontouchend="args => EndBookSwipe(args, book.InventoryId)">
+                                            <td>@book.InventoryId</td>
+                                            <td>@book.Title</td>
+                                            <td>@book.Authors</td>
+                                            <td>
+                                                <button class="police-trash-button" type="button" title="Ukloni knjigu" @onclick="() => RemoveBookFromEditShelf(book.InventoryId)">
+                                                    <MudIcon Icon="@Icons.Material.Filled.Delete" />
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="police-pager">
+                        <button type="button" disabled="@(_bookPage == 1)" @onclick="PreviousPage" aria-label="Prethodna strana">
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+                        </button>
+                        <span>@_bookPage / @PageCount</span>
+                        <button type="button" disabled="@(_bookPage >= PageCount)" @onclick="NextPage" aria-label="Sledeca strana">
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                        </button>
+                    </div>
+                }
+                else
+                {
+                    <div class="media-tabbar police-view-tabs">
+                        <button class="media-tab @(_viewMode == PoliceViewMode.Table ? "active" : "")" type="button" @onclick="ShowTableView">
+                            <span class="tab-icon shelf-icon"></span>
+                            Tabela
+                        </button>
+                        <button class="media-tab @(_viewMode == PoliceViewMode.Cards ? "active" : "")" type="button" @onclick="ShowCardsView">
+                            <span class="tab-icon"></span>
+                            Knjige
+                        </button>
+                    </div>
+
+                    @if (_viewMode == PoliceViewMode.Table)
+                    {
+                        <div class="police-table-wrap">
+                            <table class="police-table">
+                                <thead>
+                                    <tr>
+                                        <th>
+                                            <button class="police-sort-button" type="button" @onclick='() => SortBy("id")'>
+                                                ID
+                                                @SortIcon("id")
+                                            </button>
+                                        </th>
+                                        <th>
+                                            <button class="police-sort-button" type="button" @onclick='() => SortBy("title")'>
+                                                Naslov knjige
+                                                @SortIcon("title")
+                                            </button>
+                                        </th>
+                                        <th>
+                                            <button class="police-sort-button" type="button" @onclick='() => SortBy("authors")'>
+                                                Autori
+                                                @SortIcon("authors")
+                                            </button>
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @if (_books.Count == 0)
+                                    {
+                                        <tr>
+                                            <td colspan="3" class="police-empty-row">Nema knjiga na izabranoj polici.</td>
+                                        </tr>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var book in PagedBooks)
+                                        {
+                                            <tr>
+                                                <td>@book.InventoryId</td>
+                                                <td>@book.Title</td>
+                                                <td>@book.Authors</td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="police-card-view">
+                            @if (_books.Count == 0)
+                            {
+                                <div class="police-empty-row">Nema knjiga na izabranoj polici.</div>
+                            }
+                            else
+                            {
+                                @foreach (var book in PagedBooks)
+                                {
+                                    <article class="police-book-card">
+                                        <div class="police-book-cover-wrap">
+                                            @if (!IsBookCoverLoaded(book.InventoryId))
+                                            {
+                                                <div class="police-cover-loading">
+                                                    <MudProgressCircular Class="police-cover-progress" Color="Color.Primary" Indeterminate="true" Size="Size.Small" />
+                                                </div>
+                                            }
+                                            <img class="police-book-cover @(IsBookCoverLoaded(book.InventoryId) ? "loaded" : "")"
+                                                 src="@book.ImageUrl"
+                                                 alt="@book.Title"
+                                                 loading="lazy"
+                                                 @onload="() => OnBookCoverLoaded(book.InventoryId)"
+                                                 @onerror="() => OnBookCoverLoaded(book.InventoryId)" />
+                                        </div>
+                                        <div class="police-book-info">
+                                            <span class="police-book-id">@book.InventoryId</span>
+                                            <MudText Class="police-book-title">@book.Title</MudText>
+                                            <MudText Class="police-book-authors">@book.Authors</MudText>
+                                        </div>
+                                    </article>
+                                }
+                            }
+                        </div>
+                    }
+
+                    <div class="police-pager">
+                        <button type="button" disabled="@(_bookPage == 1)" @onclick="PreviousPage" aria-label="Prethodna strana">
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronLeft" />
+                        </button>
+                        <span>@_bookPage / @PageCount</span>
+                        <button type="button" disabled="@(_bookPage >= PageCount)" @onclick="NextPage" aria-label="Sledeca strana">
+                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                        </button>
+                    </div>
+                }
+            </MudPaper>
+        </div>
+    }
+</MudContainer>
+
+@code {
+    private List<CabinetChoice> _cabinets = [];
+    private List<ShelfChoice> _shelves = [];
+    private List<ShelfBook> _books = [];
+    private List<ShelfBook> _editBooks = [];
+    private Stack<List<ShelfBook>> _editHistory = [];
+    private HashSet<int> _loadedBookCoverIds = [];
+    private int? _selectedCabinetId;
+    private int? _selectedShelfId;
+    private int _bookPage = 1;
+    private PoliceViewMode _viewMode = PoliceViewMode.Table;
+    private bool _editMode;
+    private string _addBookId = "";
+    private string _editMessage = "";
+    private string _sortColumn = "id";
+    private bool _sortAscending = true;
+    private int? _swipeBookId;
+    private double _swipeStartX;
+    private double _swipeStartY;
+    private bool _loading = true;
+    private bool _cabinetImageRequested;
+    private bool _cabinetImageVisible;
+    private DateTime _cabinetLoadingStartedAt;
+    private int PageSize => _editMode ? 8 : _viewMode == PoliceViewMode.Table ? 10 : 6;
+
+    private IEnumerable<ShelfChoice> ShelvesForSelectedCabinet => _shelves
+        .Where(shelf => shelf.CabinetId == _selectedCabinetId)
+        .OrderBy(shelf => shelf.Id);
+
+    private string SelectedCabinetName => _cabinets.FirstOrDefault(cabinet => cabinet.Id == _selectedCabinetId)?.Name ?? "";
+    private string SelectedCabinetImageUrl => _selectedCabinetId is null ? "" : $"/cabinet-image/{_selectedCabinetId}";
+    private int PageCount => Math.Max(1, (int)Math.Ceiling(ActiveBookCount / (double)PageSize));
+    private int ActiveBookCount => _editMode ? _editBooks.Count : _books.Count;
+    private bool CanUndoEdit => _editHistory.Count > 0;
+    private IEnumerable<ShelfBook> PagedBooks => SortedBooks().Skip((_bookPage - 1) * PageSize).Take(PageSize);
+    private IEnumerable<ShelfBook> PagedEditBooks => _editBooks.OrderBy(book => book.InventoryId).Skip((_bookPage - 1) * PageSize).Take(PageSize);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cabinets = await LoadCabinets();
+        _shelves = await LoadShelves();
+
+        var firstCabinet = _cabinets.FirstOrDefault();
+        if (firstCabinet is not null)
+        {
+            _selectedCabinetId = firstCabinet.Id;
+            var cabinetShelves = ShelvesForSelectedCabinet.ToList();
+            _selectedShelfId = cabinetShelves.FirstOrDefault(shelf => shelf.Id == 1)?.Id
+                ?? cabinetShelves.FirstOrDefault()?.Id;
+        }
+
+        await LoadBooksForSelectedShelf();
+        _loading = false;
+        await QueueCabinetImageLoad();
+    }
+
+    private async Task<List<CabinetChoice>> LoadCabinets()
+    {
+        var rows = await Db.QueryAsync("SELECT id, naziv FROM orman ORDER BY id");
+        return rows.Select(row => new CabinetChoice(ToInt(row["id"]), ToStringValue(row["naziv"]))).ToList();
+    }
+
+    private async Task<List<ShelfChoice>> LoadShelves()
+    {
+        var rows = await Db.QueryAsync("SELECT id, x, y, orman_id FROM polica ORDER BY orman_id, id");
+        return rows.Select(row => new ShelfChoice(
+            ToInt(row["id"]),
+            ToInt(row["x"]),
+            ToInt(row["y"]),
+            ToInt(row["orman_id"]))).ToList();
+    }
+
+    private async Task ChangeCabinet(ChangeEventArgs args)
+    {
+        if (!int.TryParse(StringValue(args), NumberStyles.Integer, CultureInfo.InvariantCulture, out var cabinetId))
+        {
+            return;
+        }
+
+        _selectedCabinetId = cabinetId;
+        _selectedShelfId = ShelvesForSelectedCabinet.FirstOrDefault()?.Id;
+        _bookPage = 1;
+        _editMode = false;
+        await LoadBooksForSelectedShelf();
+        await QueueCabinetImageLoad();
+    }
+
+    private async Task SelectShelf(int shelfId)
+    {
+        _selectedShelfId = shelfId;
+        _bookPage = 1;
+        _editMode = false;
+        await LoadBooksForSelectedShelf();
+    }
+
+    private void PreviousPage()
+    {
+        _bookPage = Math.Max(1, _bookPage - 1);
+    }
+
+    private void NextPage()
+    {
+        _bookPage = Math.Min(PageCount, _bookPage + 1);
+    }
+
+    private void ShowTableView()
+    {
+        _viewMode = PoliceViewMode.Table;
+        _bookPage = 1;
+    }
+
+    private void ShowCardsView()
+    {
+        _viewMode = PoliceViewMode.Cards;
+        _bookPage = 1;
+        _loadedBookCoverIds.Clear();
+    }
+
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column)
+        {
+            _sortAscending = !_sortAscending;
+        }
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+
+        _bookPage = 1;
+    }
+
+    private void EditShelf()
+    {
+        _editBooks = SortedBooks();
+        _editMode = true;
+        _bookPage = 1;
+        _addBookId = "";
+        _editMessage = "";
+        _editHistory.Clear();
+    }
+
+    private void CancelEditShelf()
+    {
+        _editMode = false;
+        _editBooks = [];
+        _editHistory.Clear();
+        _bookPage = 1;
+        _addBookId = "";
+        _editMessage = "";
+    }
+
+    private void RemoveBookFromEditShelf(int inventoryId)
+    {
+        SaveEditSnapshot();
+        _editBooks = _editBooks.Where(book => book.InventoryId != inventoryId).ToList();
+        _bookPage = Math.Min(_bookPage, PageCount);
+        _editMessage = "";
+    }
+
+    private void StartBookSwipe(TouchEventArgs args, int inventoryId)
+    {
+        var touch = args.Touches.FirstOrDefault() ?? args.ChangedTouches.FirstOrDefault();
+        if (touch is null)
+        {
+            return;
+        }
+
+        _swipeBookId = inventoryId;
+        _swipeStartX = touch.ClientX;
+        _swipeStartY = touch.ClientY;
+    }
+
+    private void EndBookSwipe(TouchEventArgs args, int inventoryId)
+    {
+        var touch = args.ChangedTouches.FirstOrDefault();
+        if (touch is null || _swipeBookId != inventoryId)
+        {
+            _swipeBookId = null;
+            return;
+        }
+
+        var deltaX = touch.ClientX - _swipeStartX;
+        var deltaY = Math.Abs(touch.ClientY - _swipeStartY);
+        _swipeBookId = null;
+
+        if (deltaX > 64 && deltaY < 80)
+        {
+            RemoveBookFromEditShelf(inventoryId);
+        }
+    }
+
+    private void UndoShelfEdit()
+    {
+        if (!CanUndoEdit)
+        {
+            return;
+        }
+
+        _editBooks = _editHistory.Pop();
+        _bookPage = Math.Min(_bookPage, PageCount);
+        _editMessage = "";
+    }
+
+    private async Task AddBookToEditShelf()
+    {
+        if (!int.TryParse(_addBookId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var inventoryId))
+        {
+            _editMessage = "Unesite ispravan ID knjige.";
+            return;
+        }
+
+        if (_editBooks.Any(book => book.InventoryId == inventoryId))
+        {
+            _editMessage = $"Knjiga {inventoryId} je već na listi za ovu policu.";
+            return;
+        }
+
+        var book = await LoadBookByInventoryId(inventoryId);
+        if (book is null)
+        {
+            _editMessage = $"Knjiga sa ID {inventoryId} nije pronađena.";
+            return;
+        }
+
+        SaveEditSnapshot();
+        _editBooks.Add(book);
+        _editBooks = _editBooks.OrderBy(item => item.InventoryId).ToList();
+        _addBookId = "";
+        _editMessage = "";
+    }
+
+    private async Task HandleAddBookKeyDown(KeyboardEventArgs args)
+    {
+        if (args.Key == "Enter")
+        {
+            await AddBookToEditShelf();
+        }
+    }
+
+    private async Task SaveShelfChanges()
+    {
+        if (_selectedShelfId is null)
+        {
+            return;
+        }
+
+        var currentRows = await Db.QueryAsync(
+            "SELECT knjiga_id FROM knjiga WHERE polica_id = @shelf_id AND knjiga_id IS NOT NULL",
+            new { ShelfId = _selectedShelfId.Value });
+        var currentIds = currentRows.Select(row => ToInt(row["knjiga_id"])).ToHashSet();
+        var desiredIds = _editBooks.Select(book => book.InventoryId).ToHashSet();
+
+        foreach (var inventoryId in currentIds.Except(desiredIds))
+        {
+            await Db.ExecuteAsync("UPDATE knjiga SET polica_id = NULL WHERE knjiga_id = @knjiga_id", new { KnjigaId = inventoryId });
+        }
+
+        foreach (var inventoryId in desiredIds.Except(currentIds))
+        {
+            await Db.ExecuteAsync("UPDATE knjiga SET polica_id = @polica_id WHERE knjiga_id = @knjiga_id", new { PolicaId = _selectedShelfId.Value, KnjigaId = inventoryId });
+        }
+
+        _editMode = false;
+        _editBooks = [];
+        _editHistory.Clear();
+        _editMessage = "";
+        _bookPage = 1;
+        await LoadBooksForSelectedShelf();
+    }
+
+    private void SaveEditSnapshot()
+    {
+        _editHistory.Push(_editBooks.ToList());
+    }
+
+    private async Task OnCabinetImageLoaded()
+    {
+        var elapsed = DateTime.UtcNow - _cabinetLoadingStartedAt;
+        var remaining = TimeSpan.FromMilliseconds(900) - elapsed;
+        if (remaining > TimeSpan.Zero)
+        {
+            await Task.Delay(remaining);
+        }
+
+        _cabinetImageVisible = true;
+        await JS.InvokeVoidAsync("ormanDesigner.setAllMapRatios");
+    }
+
+    private async Task QueueCabinetImageLoad()
+    {
+        _cabinetImageVisible = false;
+        _cabinetImageRequested = false;
+        _cabinetLoadingStartedAt = DateTime.UtcNow;
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(150);
+        _cabinetImageRequested = _selectedCabinetId is not null;
+    }
+
+    private async Task LoadBooksForSelectedShelf()
+    {
+        if (_selectedShelfId is null)
+        {
+            _books = [];
+            return;
+        }
+
+        var rows = await Db.QueryAsync(
+            @"
+            SELECT
+                k.id,
+                k.knjiga_id,
+                k.naslov,
+                COALESCE(
+                    GROUP_CONCAT(DISTINCT a.ime ORDER BY a.ime SEPARATOR ', '),
+                    '(grupa autora)'
+                ) AS autori
+            FROM knjiga k
+            LEFT JOIN autorknjiga ak ON ak.knjiga_id = k.knjiga_id
+            LEFT JOIN autor a ON a.id = ak.autor_id
+            WHERE k.polica_id = @shelf_id
+            GROUP BY k.id, k.knjiga_id, k.naslov
+            ORDER BY COALESCE(k.knjiga_id, k.id), k.naslov
+            ",
+            new { ShelfId = _selectedShelfId.Value });
+
+        _books = rows.Select(row => new ShelfBook(
+            ToInt(row["id"]),
+            row["knjiga_id"] is null ? ToInt(row["id"]) : ToInt(row["knjiga_id"]),
+            ToStringValue(row["naslov"]),
+            ToStringValue(row["autori"]))).ToList();
+        _loadedBookCoverIds.Clear();
+    }
+
+    private async Task<ShelfBook?> LoadBookByInventoryId(int inventoryId)
+    {
+        var rows = await Db.QueryAsync(
+            @"
+            SELECT
+                k.id,
+                k.knjiga_id,
+                k.naslov,
+                COALESCE(
+                    GROUP_CONCAT(DISTINCT a.ime ORDER BY a.ime SEPARATOR ', '),
+                    '(grupa autora)'
+                ) AS autori
+            FROM knjiga k
+            LEFT JOIN autorknjiga ak ON ak.knjiga_id = k.knjiga_id
+            LEFT JOIN autor a ON a.id = ak.autor_id
+            WHERE k.knjiga_id = @knjiga_id
+            GROUP BY k.id, k.knjiga_id, k.naslov
+            LIMIT 1
+            ",
+            new { KnjigaId = inventoryId });
+
+        var row = rows.FirstOrDefault();
+        return row is null
+            ? null
+            : new ShelfBook(
+                ToInt(row["id"]),
+                ToInt(row["knjiga_id"]),
+                ToStringValue(row["naslov"]),
+                ToStringValue(row["autori"]));
+    }
+
+    private bool IsBookCoverLoaded(int inventoryId) => _loadedBookCoverIds.Contains(inventoryId);
+
+    private void OnBookCoverLoaded(int inventoryId)
+    {
+        _loadedBookCoverIds.Add(inventoryId);
+    }
+
+    private static string StringValue(ChangeEventArgs args) => Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+    private static int ToInt(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    private static string ToStringValue(object? value) => WebUtility.HtmlDecode(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
+    private List<ShelfBook> SortedBooks()
+    {
+        IEnumerable<ShelfBook> sorted = _sortColumn switch
+        {
+            "title" => _sortAscending
+                ? _books.OrderBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.InventoryId)
+                : _books.OrderByDescending(book => book.Title, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.InventoryId),
+            "authors" => _sortAscending
+                ? _books.OrderBy(book => book.Authors, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase)
+                : _books.OrderByDescending(book => book.Authors, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase),
+            _ => _sortAscending
+                ? _books.OrderBy(book => book.InventoryId).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase)
+                : _books.OrderByDescending(book => book.InventoryId).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase)
+        };
+
+        return sorted.ToList();
+    }
+
+    private RenderFragment SortIcon(string column) => builder =>
+    {
+        if (_sortColumn != column)
+        {
+            builder.OpenComponent<MudIcon>(0);
+            builder.AddAttribute(1, "Icon", Icons.Material.Filled.UnfoldMore);
+            builder.AddAttribute(2, "Class", "police-sort-icon muted");
+            builder.CloseComponent();
+            return;
+        }
+
+        builder.OpenComponent<MudIcon>(3);
+        builder.AddAttribute(4, "Icon", _sortAscending ? Icons.Material.Filled.ArrowUpward : Icons.Material.Filled.ArrowDownward);
+        builder.AddAttribute(5, "Class", "police-sort-icon active");
+        builder.CloseComponent();
+    };
+
+    private static string ShelfStyle(ShelfChoice shelf)
+    {
+        return $"left: calc(var(--orman-scale, 1) * {shelf.X}px); top: calc(var(--orman-scale, 1) * {shelf.Y}px);";
+    }
+
+    private sealed record CabinetChoice(int Id, string Name);
+    private sealed record ShelfChoice(int Id, int X, int Y, int CabinetId);
+    private enum PoliceViewMode
+    {
+        Table,
+        Cards
+    }
+
+    private sealed record ShelfBook(int Id, int InventoryId, string Title, string Authors)
+    {
+        public string ImageUrl => $"/book-cover/{InventoryId}";
+    }
+}

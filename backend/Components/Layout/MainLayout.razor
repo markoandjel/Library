@@ -1,0 +1,65 @@
+﻿@inherits LayoutComponentBase
+
+<MudThemeProvider Theme="_theme" />
+<MudPopoverProvider />
+<MudDialogProvider />
+<MudSnackbarProvider />
+
+<MudLayout>
+    <MudAppBar Class="@AppBarClass" Elevation="1" Dense="true">
+        <MudIconButton Class="mobile-menu-button" Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start" OnClick="ToggleDrawer" />
+        <MudText Typo="Typo.h6" Class="app-menu-title">Biblioteka</MudText>
+    </MudAppBar>
+    <MudDrawer Class="desktop-menu-drawer" Open="true" Anchor="Anchor.Left" Variant="DrawerVariant.Persistent" Elevation="1">
+        <MudNavMenu Class="app-nav-menu">
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.MenuBook">Knjige</MudNavLink>
+            <MudNavLink Href="/police" Icon="@Icons.Material.Filled.ViewList">Police</MudNavLink>
+            <MudNavLink Href="/ormani" Icon="@Icons.Material.Filled.Inventory2">Ormani</MudNavLink>
+            <MudNavLink Href="/uvoz-knjiga" Icon="@Icons.Material.Filled.UploadFile">Uvoz knjiga</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+    <MudDrawer Class="mobile-menu-drawer" @bind-Open="_drawerOpen" Anchor="Anchor.Left" Variant="DrawerVariant.Temporary" Elevation="2">
+        <MudNavMenu Class="app-nav-menu">
+            <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.MenuBook">Knjige</MudNavLink>
+            <MudNavLink Href="/police" Icon="@Icons.Material.Filled.ViewList">Police</MudNavLink>
+            <MudNavLink Href="/ormani" Icon="@Icons.Material.Filled.Inventory2">Ormani</MudNavLink>
+            <MudNavLink Href="/uvoz-knjiga" Icon="@Icons.Material.Filled.UploadFile">Uvoz knjiga</MudNavLink>
+        </MudNavMenu>
+    </MudDrawer>
+    <MudMainContent>
+        @Body
+    </MudMainContent>
+</MudLayout>
+
+@code {
+    private bool _drawerOpen;
+    private string AppBarClass => _drawerOpen ? "app-menu-bar mobile-drawer-open" : "app-menu-bar";
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private readonly MudTheme _theme = new()
+    {
+        PaletteLight = new PaletteLight
+        {
+            Primary = "#1976d2",
+            Secondary = "#2f80ed",
+            Background = "#ffffff",
+            Surface = "#ffffff",
+            AppbarBackground = "#ffffff",
+            TextPrimary = "#111827",
+            TextSecondary = "#5b6472",
+            Divider = "#d8dde6"
+        },
+        LayoutProperties = new LayoutProperties
+        {
+            DefaultBorderRadius = "8px"
+        },
+        Typography = new Typography
+        {
+            Default = new DefaultTypography
+            {
+                FontFamily = ["Inter", "Arial", "sans-serif"]
+            }
+        }
+    };
+}

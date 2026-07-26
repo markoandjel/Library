@@ -1,0 +1,1098 @@
+@page "/"
+@inject Db Db
+@inject ISnackbar Snackbar
+@inject NavigationManager Navigation
+@inject IJSRuntime JS
+@using System.Net
+@using System.Net.Http.Json
+@using Microsoft.JSInterop
+@using MudBlazor
+
+<PageTitle>Library</PageTitle>
+
+<MudContainer MaxWidth="MaxWidth.False" Class="library-shell">
+    <MudPaper Class="filter-bar" Elevation="1">
+        <div class="filters">
+            <MudText Class="filter-label">ID</MudText>
+            <input class="library-input id-input" type="number" min="1" value="@_selectedId" @oninput="LoadSelectedByInventoryId" />
+
+            <div class="combo-wrap author-combo">
+                <div class="combo-control">
+                    <input class="library-input combo-input" placeholder="Autor" value="@_authorSearch" @oninput="SearchAuthorInput" @onfocus="OpenAuthorDropdown" />
+                    <button class="combo-toggle" type="button" aria-label="Open author dropdown" @onclick="ToggleAuthorDropdown"></button>
+                </div>
+                @if (_authorDropdownOpen)
+                {
+                    <div class="search-dropdown">
+                        <div class="dropdown-search">
+                            <input class="dropdown-search-input" placeholder="Pretraga..." value="@_authorDropdownSearch" @oninput="SearchAuthorDropdown" />
+                        </div>
+                        <div class="result-table author-results">
+                            <button class="result-head" type="button" @onclick='() => SetAuthorSort("author")'>Autor @SortIndicator(_authorSortColumn, _authorSortAscending, "author")</button>
+                            <button class="result-head" type="button" @onclick='() => SetAuthorSort("title")'>Naslov @SortIndicator(_authorSortColumn, _authorSortAscending, "title")</button>
+                            @foreach (var book in AuthorPageBooks)
+                            {
+                                <button class="result-cell" type="button" title="@book.Author" @onclick="() => SelectDropdownBook(book, true)">@book.Author</button>
+                                <button class="result-cell" type="button" title="@book.Title" @onclick="() => SelectDropdownBook(book, true)">@book.Title</button>
+                            }
+                        </div>
+                        <div class="dropdown-pager">
+                            <button type="button" disabled="@(_authorPage == 1)" @onclick="() => SetAuthorPage(1)">|&lt;</button>
+                            <button type="button" disabled="@(_authorPage == 1)" @onclick="() => SetAuthorPage(_authorPage - 1)">&lt;</button>
+                            <span>@_authorPage</span>
+                            <button type="button" disabled="@(_authorPage >= AuthorPageCount)" @onclick="() => SetAuthorPage(_authorPage + 1)">&gt;</button>
+                            <button type="button" disabled="@(_authorPage >= AuthorPageCount)" @onclick="() => SetAuthorPage(AuthorPageCount)">&gt;|</button>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="combo-wrap title-combo">
+                <div class="combo-control">
+                    <input class="library-input combo-input" placeholder="Naslov" value="@_titleSearch" @oninput="SearchTitleInput" @onfocus="OpenTitleDropdown" />
+                    <button class="combo-toggle" type="button" aria-label="Open title dropdown" @onclick="ToggleTitleDropdown"></button>
+                </div>
+                @if (_titleDropdownOpen)
+                {
+                    <div class="search-dropdown">
+                        <div class="dropdown-search">
+                            <input class="dropdown-search-input" placeholder="Pretraga..." value="@_titleDropdownSearch" @oninput="SearchTitleDropdown" />
+                        </div>
+                        <div class="result-table title-results">
+                            <button class="result-head" type="button" @onclick='() => SetTitleSort("title")'>Naslov @SortIndicator(_titleSortColumn, _titleSortAscending, "title")</button>
+                            <button class="result-head" type="button" @onclick='() => SetTitleSort("author")'>Autor @SortIndicator(_titleSortColumn, _titleSortAscending, "author")</button>
+                            @foreach (var book in TitlePageBooks)
+                            {
+                                <button class="result-cell" type="button" title="@book.Title" @onclick="() => SelectDropdownBook(book, false)">@book.Title</button>
+                                <button class="result-cell" type="button" title="@book.Author" @onclick="() => SelectDropdownBook(book, false)">@book.Author</button>
+                            }
+                        </div>
+                        <div class="dropdown-pager">
+                            <button type="button" disabled="@(_titlePage == 1)" @onclick="() => SetTitlePage(1)">|&lt;</button>
+                            <button type="button" disabled="@(_titlePage == 1)" @onclick="() => SetTitlePage(_titlePage - 1)">&lt;</button>
+                            <span>@_titlePage</span>
+                            <button type="button" disabled="@(_titlePage >= TitlePageCount)" @onclick="() => SetTitlePage(_titlePage + 1)">&gt;</button>
+                            <button type="button" disabled="@(_titlePage >= TitlePageCount)" @onclick="() => SetTitlePage(TitlePageCount)">&gt;|</button>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="edit-actions">
+            @if (_editMode)
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Success" StartIcon="@Icons.Material.Filled.Save" Class="save-button" OnClick="SaveEdit">
+                    Sacuvaj izmene
+                </MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Visibility" Class="edit-button" OnClick="ToggleEditMode">
+                    Pregled knjige
+                </MudButton>
+            }
+            else
+            {
+                <MudButton Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Edit" Class="edit-button" OnClick="ToggleEditMode">
+                    Uredi knjigu
+                </MudButton>
+            }
+        </div>
+    </MudPaper>
+
+    @if (_loading)
+    {
+        <MudPaper Class="library-state-panel" Elevation="0">
+            <MudProgressLinear Color="Color.Primary" Indeterminate="true" Class="library-state-progress" />
+            <MudText Class="library-state-text">Ucitavanje knjige...</MudText>
+        </MudPaper>
+    }
+    else if (!string.IsNullOrWhiteSpace(_loadError))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-4">@_loadError</MudAlert>
+    }
+    else if (_selectedBook is null)
+    {
+        <MudAlert Severity="Severity.Info" Class="mt-4">No book selected.</MudAlert>
+    }
+    else
+    {
+        <section class="book-view @(_editMode ? "edit-view" : "read-view")">
+            <div class="book-main">
+                @if (_editMode && _editBook is not null)
+                {
+                    <div class="book-header edit-header">
+                        <MudPaper Class="book-id" Elevation="1">@_selectedBook.InventoryId</MudPaper>
+                        <div class="edit-title-wrap">
+                            <MudText Class="author-group">@SelectedAuthorText</MudText>
+                            <input class="edit-input edit-title-input" value="@_editBook.Title" @oninput="args => _editBook.Title = StringValue(args)" />
+                        </div>
+                    </div>
+
+                    <div class="edit-layout">
+                        <div class="edit-fields">
+                            <label class="edit-row">
+                                <span>Prim. uz naslov:</span>
+                                <input class="edit-input" value="@_editBook.TitleNote" @oninput="args => _editBook.TitleNote = StringValue(args)" />
+                            </label>
+                            <label class="edit-row">
+                                <span>Izdavač:</span>
+                                <select class="edit-input" value="@_editBook.PublisherId" @onchange="args => _editBook.PublisherId = NullableInt(args)">
+                                    <option value="">Select izdavac</option>
+                                    @foreach (var publisher in _publishers)
+                                    {
+                                        <option value="@publisher.Id">@publisher.Name</option>
+                                    }
+                                </select>
+                            </label>
+                            <div class="edit-pairs">
+                                <label class="edit-row year-row"><span>Godina izdanja:</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.Year" @oninput="args => _editBook.Year = PositiveInt(args)" /></label>
+                                <label class="edit-row width-row"><span>Širina (mm):</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.Width" @oninput="args => _editBook.Width = PositiveInt(args)" /></label>
+                                <label class="edit-row pages-row"><span>Broj strana:</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.PageCount" @oninput="args => _editBook.PageCount = PositiveInt(args)" /></label>
+                                <label class="edit-row height-row"><span>Visina (mm):</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.Height" @oninput="args => _editBook.Height = PositiveInt(args)" /></label>
+                                <label class="edit-row volumes-row"><span>Broj tomova:</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.VolumeCount" @oninput="args => _editBook.VolumeCount = PositiveInt(args)" /></label>
+                                <label class="edit-row thickness-row"><span>Debljina (mm):</span><input class="edit-input number-input" type="number" min="1" step="1" value="@_editBook.Thickness" @oninput="args => _editBook.Thickness = PositiveInt(args)" /></label>
+                            </div>
+                            @Selector("Jezik", "Odaberi jezik", _languages, _editLanguageIds, ToggleEditLanguage)
+                            @Selector("Pismo", "Odaberi pismo", _scripts, _editScriptIds, ToggleEditScript)
+                            @Selector("Originalni jezik", "Odaberi orig. jezik", _languages, _editOriginalLanguageIds, ToggleEditOriginalLanguage)
+                            <label class="edit-row">
+                                <span>ISBN:</span>
+                                <input class="edit-input" value="@_editBook.Isbn" @oninput="args => _editBook.Isbn = StringValue(args)" />
+                            </label>
+                            <label class="edit-row edit-note-row">
+                                <span>Primedba:</span>
+                                <textarea class="edit-input edit-textarea" value="@_editBook.BookNote" @oninput="args => _editBook.BookNote = StringValue(args)"></textarea>
+                            </label>
+                        </div>
+
+                        <div class="category-grid edit-category-grid">
+                            <label class="category-check edit-check"><input type="checkbox" checked="@_editBook.Prevod" @onchange="args => _editBook.Prevod = BoolValue(args)" />Prevod</label>
+                            <label class="category-check edit-check"><input type="checkbox" checked="@_editBook.DomaciAutor" @onchange="args => _editBook.DomaciAutor = BoolValue(args)" />Domaci autor</label>
+                            <label class="category-check edit-check"><input type="checkbox" checked="@_editBook.StraniAutor" @onchange="args => _editBook.StraniAutor = BoolValue(args)" />Strani autor</label>
+                            <label class="category-check edit-check"><input type="checkbox" checked="@_editBook.TvrdiPovez" @onchange="args => _editBook.TvrdiPovez = BoolValue(args)" />Tvrdi povez</label>
+                            @foreach (var category in _categories)
+                            {
+                                <label class="category-check edit-check"><input type="checkbox" checked="@_editCategoryIds.Contains(category.Id)" @onchange="args => ToggleEditCategory(category.Id, BoolValue(args))" />@ShortCategoryName(category.Name)</label>
+                            }
+                        </div>
+                    </div>
+                }
+                else
+                {
+                <div class="book-header">
+                    <MudPaper Class="book-id" Elevation="1">@_selectedBook.InventoryId</MudPaper>
+                    <div>
+                        <MudText Class="author-group">@SelectedAuthorText</MudText>
+                        <MudText Typo="Typo.h3" Class="book-title">@_selectedBook.Title</MudText>
+                    </div>
+                </div>
+
+                <div class="details-grid">
+                    @foreach (var item in Details)
+                    {
+                        <MudText Class="detail-label">@item.Label:</MudText>
+                        <MudText Class="detail-value">@item.Value</MudText>
+                    }
+                </div>
+
+                    <div class="category-pills">
+                        @foreach (var category in SelectedViewCategories)
+                        {
+                            <span class="category-pill">@category</span>
+                        }
+                    </div>
+                }
+            </div>
+
+            <div class="media-side">
+                <div class="media-tabbar">
+                    <button class="media-tab @(_activeMedia == MediaTab.Image ? "active" : "")" type="button" @onclick="ShowImageTab"><span class="tab-icon"></span>Slika</button>
+                    <button class="media-tab @(_activeMedia == MediaTab.Shelf ? "active" : "")" type="button" @onclick="ShowShelfTab"><span class="tab-icon shelf-icon"></span>Polica</button>
+                </div>
+                @if (_activeMedia == MediaTab.Image)
+                {
+                    <MudPaper Class="image-card" Elevation="1">
+                        @if (!_coverImageVisible)
+                        {
+                            <div class="image-loading">
+                                <MudProgressCircular Class="image-progress" Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+                            </div>
+                        }
+                        <img class="book-cover-image @(_coverImageVisible ? "loaded" : "")" src="@_selectedBook.ImageUrl" alt="Book cover" @onload="OnCoverImageLoaded" @onerror="OnCoverImageLoaded" />
+                    </MudPaper>
+                }
+                else
+                {
+                    <MudPaper Class="shelf-card" Elevation="1">
+                        @if (_selectedBook.CabinetId is null || _selectedBook.ShelfId is null)
+                        {
+                            <div class="shelf-empty">Polica nije uneta</div>
+                        }
+                        else
+                        {
+                            <div class="shelf-map book-shelf-map cabinet-ratio-map">
+                                @if (!_shelfImageVisible)
+                                {
+                                    <div class="shelf-loading">
+                                        <MudProgressCircular Class="shelf-progress" Color="Color.Primary" Indeterminate="true" Size="Size.Large" />
+                                    </div>
+                                }
+                                @if (_shelfImageRequested)
+                                {
+                                    <img class="cabinet-image @(_shelfImageVisible ? "loaded" : "")" src="@_selectedBook.CabinetImageUrl" alt="@_selectedBook.CabinetName" @onload="OnShelfImageLoaded" @onerror="OnShelfImageLoaded" />
+                                }
+                                @if (_shelfImageVisible)
+                                {
+                                    @foreach (var shelf in ShelvesForSelectedCabinet)
+                                    {
+                                        <span class="shelf-marker @(shelf.Id == _selectedBook.ShelfId ? "selected" : "")" style="@ShelfStyle(shelf)">@shelf.Id</span>
+                                    }
+                                }
+                            </div>
+                            @if (_shelfImageVisible)
+                            {
+                                <div class="cabinet-caption">@_selectedBook.CabinetName</div>
+                            }
+                        }
+                    </MudPaper>
+                }
+            </div>
+        </section>
+    }
+</MudContainer>
+
+@code {
+    private bool _loading = true;
+    private string? _loadError;
+    private int _selectedId = 1;
+    private int _selectedBookId = 1;
+    private int? _selectedAuthorId;
+    private string _authorSearch = "";
+    private string _titleSearch = "";
+    private string _authorDropdownSearch = "";
+    private string _titleDropdownSearch = "";
+    private bool _authorDropdownOpen;
+    private bool _titleDropdownOpen;
+    private int _authorPage = 1;
+    private int _titlePage = 1;
+    private string _authorSortColumn = "author";
+    private string _titleSortColumn = "title";
+    private bool _authorSortAscending = true;
+    private bool _titleSortAscending = true;
+    private MediaTab _activeMedia = MediaTab.Image;
+    private bool _coverImageVisible;
+    private DateTime _coverLoadingStartedAt;
+    private bool _shelfImageRequested;
+    private bool _shelfImageVisible;
+    private DateTime _shelfLoadingStartedAt;
+    private bool _editMode;
+    private BookView? _selectedBook;
+    private BookEditModel? _editBook;
+    private List<BookChoice> _books = [];
+    private List<BookChoice> _bookChoices = [];
+    private List<NamedItem> _authors = [];
+    private List<NamedItem> _languages = [];
+    private List<NamedItem> _publishers = [];
+    private List<NamedItem> _scripts = [];
+    private List<NamedItem> _categories = [];
+    private List<ShelfPosition> _shelves = [];
+    private HashSet<int> _selectedCategoryIds = [];
+    private HashSet<int> _selectedLanguageIds = [];
+    private HashSet<int> _selectedOriginalLanguageIds = [];
+    private HashSet<int> _selectedScriptIds = [];
+    private HashSet<int> _editCategoryIds = [];
+    private HashSet<int> _editLanguageIds = [];
+    private HashSet<int> _editOriginalLanguageIds = [];
+    private HashSet<int> _editScriptIds = [];
+    private const int DropdownPageSize = 20;
+
+    private List<BookChoice> AuthorFilteredBooks => SortBooks(FilterAuthorBooks(_books, _authorDropdownSearch), _authorSortColumn, _authorSortAscending);
+    private List<BookChoice> TitleFilteredBooks => SortBooks(FilterTitleBooks(_bookChoices, _titleDropdownSearch), _titleSortColumn, _titleSortAscending);
+    private int AuthorPageCount => PageCount(AuthorFilteredBooks.Count);
+    private int TitlePageCount => PageCount(TitleFilteredBooks.Count);
+    private IEnumerable<BookChoice> AuthorPageBooks => PageBooks(AuthorFilteredBooks, _authorPage);
+    private IEnumerable<BookChoice> TitlePageBooks => PageBooks(TitleFilteredBooks, _titlePage);
+    private IEnumerable<ShelfPosition> ShelvesForSelectedCabinet => _selectedBook?.CabinetId is null
+        ? []
+        : _shelves.Where(shelf => shelf.CabinetId == _selectedBook.CabinetId).OrderBy(shelf => shelf.Id);
+    private string SelectedAuthorText => _selectedBook?.Author ?? "(grupa autora)";
+    private IEnumerable<string> SelectedViewCategories
+    {
+        get
+        {
+            if (_selectedBook is null)
+            {
+                yield break;
+            }
+
+            if (_selectedBook.Prevod ?? false) yield return "Prevod";
+            if (_selectedBook.DomaciAutor ?? false) yield return "Domaci autor";
+            if (_selectedBook.StraniAutor ?? false) yield return "Strani autor";
+            if (_selectedBook.TvrdiPovez ?? false) yield return "Tvrdi povez";
+
+            foreach (var category in _categories.Where(category => _selectedCategoryIds.Contains(category.Id)))
+            {
+                yield return ShortCategoryName(category.Name);
+            }
+        }
+    }
+
+    private IEnumerable<(string Label, string Value)> Details => _selectedBook is null
+        ? []
+        : [
+            ("Prim. uz naslov", _selectedBook.TitleNote),
+            ("Izdavač", _selectedBook.Publisher),
+            ("Godina izdanja", Text(_selectedBook.Year)),
+            ("Broj strana", Text(_selectedBook.PageCount)),
+            ("Broj tomova", Text(_selectedBook.VolumeCount)),
+            ("Širina (mm)", Text(_selectedBook.Width)),
+            ("Visina (mm)", Text(_selectedBook.Height)),
+            ("Debljina (mm)", Text(_selectedBook.Thickness)),
+            ("Jezik", _selectedBook.Language),
+            ("Pismo", _selectedBook.Script),
+            ("Jezik originala", _selectedBook.OriginalLanguage),
+            ("ISBN", _selectedBook.Isbn),
+            ("Primedba", _selectedBook.BookNote)
+        ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _authors = await LoadNamed("SELECT id, ime AS name FROM autor ORDER BY ime");
+            _languages = await LoadNamed("SELECT id, naziv AS name FROM jezik ORDER BY naziv");
+            _publishers = await LoadNamed("SELECT id, naziv AS name FROM izdavac ORDER BY naziv");
+            _scripts = await LoadNamed("SELECT id, naziv AS name FROM pismo ORDER BY naziv");
+            _categories = await LoadNamed("SELECT id, naziv AS name FROM kategorija ORDER BY naziv");
+            _shelves = await LoadShelves();
+            _books = await LoadBooks();
+            _bookChoices = _books;
+
+            if (_books.Count > 0)
+            {
+                await SetSelectedBook(_books[0].Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _loadError = $"Knjige nisu ucitane: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task<List<NamedItem>> LoadNamed(string sql)
+    {
+        var rows = await Db.QueryAsync(sql);
+        return rows.Select(row => new NamedItem(ToInt(row["id"]), ToStringValue(row["name"]))).ToList();
+    }
+
+    private async Task<List<BookChoice>> LoadBooks()
+    {
+        var rows = await Db.QueryAsync(
+            @"
+            SELECT
+                k.id,
+                k.knjiga_id,
+                k.naslov,
+                COALESCE(
+                    GROUP_CONCAT(DISTINCT a.ime ORDER BY a.ime SEPARATOR ', '),
+                    '(grupa autora)'
+                ) AS autor
+            FROM knjiga k
+            LEFT JOIN autorknjiga ak ON ak.knjiga_id = k.knjiga_id
+            LEFT JOIN autor a ON a.id = ak.autor_id
+            GROUP BY k.id, k.knjiga_id, k.naslov
+            ORDER BY k.id
+            ");
+        return rows.Select(row => new BookChoice(
+            ToInt(row["id"]),
+            ToStringValue(row["naslov"]),
+            row["knjiga_id"] is null ? null : ToInt(row["knjiga_id"]),
+            ToStringValue(row["autor"]))).ToList();
+    }
+
+    private async Task<List<ShelfPosition>> LoadShelves()
+    {
+        var rows = await Db.QueryAsync("SELECT id, x, y, orman_id FROM polica ORDER BY orman_id, id");
+        return rows.Select(row => new ShelfPosition(
+            ToInt(row["id"]),
+            ToInt(row["x"]),
+            ToInt(row["y"]),
+            ToInt(row["orman_id"]))).ToList();
+    }
+
+    private async Task LoadSelectedByInventoryId(ChangeEventArgs args)
+    {
+        if (int.TryParse(Convert.ToString(args.Value, CultureInfo.InvariantCulture), out var value))
+        {
+            await SetSelectedBookByInventoryId(value);
+        }
+    }
+
+    private void SearchTitleInput(ChangeEventArgs args)
+    {
+        _titleSearch = Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+        _titleDropdownSearch = _titleSearch;
+        _titleDropdownOpen = true;
+        _authorDropdownOpen = false;
+        _titlePage = 1;
+    }
+
+    private void SearchAuthorInput(ChangeEventArgs args)
+    {
+        _authorSearch = Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+        _authorDropdownSearch = _authorSearch;
+        _authorDropdownOpen = true;
+        _titleDropdownOpen = false;
+        _authorPage = 1;
+    }
+
+    private void SearchTitleDropdown(ChangeEventArgs args)
+    {
+        _titleDropdownSearch = Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+        _titlePage = 1;
+    }
+
+    private void SearchAuthorDropdown(ChangeEventArgs args)
+    {
+        _authorDropdownSearch = Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+        _authorPage = 1;
+    }
+
+    private async Task FilterByAuthor(int? authorId)
+    {
+        _selectedAuthorId = authorId;
+        if (authorId is null)
+        {
+            _bookChoices = _books;
+        }
+        else
+        {
+            var rows = await Db.QueryAsync(
+                @"
+                SELECT k.id, k.naslov
+                FROM knjiga k
+                INNER JOIN autorknjiga ak ON ak.knjiga_id = k.knjiga_id
+                WHERE ak.autor_id = @author_id
+                ORDER BY k.naslov
+                ",
+                new { AuthorId = authorId });
+            _bookChoices = rows.Select(row => _books.First(book => book.Id == ToInt(row["id"]))).ToList();
+        }
+
+        if (_bookChoices.Count > 0)
+        {
+            await SetSelectedBook(_bookChoices[0].Id);
+        }
+    }
+
+    private async Task SelectDropdownBook(BookChoice book, bool fromAuthorDropdown)
+    {
+        if (fromAuthorDropdown)
+        {
+            _authorSearch = book.Author;
+            _authorDropdownSearch = book.Author;
+            var authorId = _authors.FirstOrDefault(author => author.Name.Equals(book.Author, StringComparison.OrdinalIgnoreCase))?.Id;
+            await FilterByAuthor(authorId);
+            await SetSelectedBook(book.Id);
+            _authorDropdownOpen = false;
+        }
+        else
+        {
+            await SetSelectedBook(book.Id);
+            _titleDropdownOpen = false;
+        }
+    }
+
+    private void OpenAuthorDropdown()
+    {
+        _authorDropdownOpen = true;
+        _titleDropdownOpen = false;
+        _authorDropdownSearch = "";
+        _authorPage = 1;
+    }
+
+    private void OpenTitleDropdown()
+    {
+        _titleDropdownOpen = true;
+        _authorDropdownOpen = false;
+        _titleDropdownSearch = "";
+        _titlePage = 1;
+    }
+
+    private void ToggleAuthorDropdown()
+    {
+        if (_authorDropdownOpen)
+        {
+            _authorDropdownOpen = false;
+            return;
+        }
+
+        OpenAuthorDropdown();
+    }
+
+    private void ToggleTitleDropdown()
+    {
+        if (_titleDropdownOpen)
+        {
+            _titleDropdownOpen = false;
+            return;
+        }
+
+        OpenTitleDropdown();
+    }
+
+    private void SetAuthorPage(int page) => _authorPage = Math.Clamp(page, 1, AuthorPageCount);
+    private void SetTitlePage(int page) => _titlePage = Math.Clamp(page, 1, TitlePageCount);
+
+    private void SetAuthorSort(string column)
+    {
+        if (_authorSortColumn == column)
+        {
+            _authorSortAscending = !_authorSortAscending;
+        }
+        else
+        {
+            _authorSortColumn = column;
+            _authorSortAscending = true;
+        }
+
+        _authorPage = 1;
+    }
+
+    private void SetTitleSort(string column)
+    {
+        if (_titleSortColumn == column)
+        {
+            _titleSortAscending = !_titleSortAscending;
+        }
+        else
+        {
+            _titleSortColumn = column;
+            _titleSortAscending = true;
+        }
+
+        _titlePage = 1;
+    }
+
+    private async Task ShowImageTab()
+    {
+        _activeMedia = MediaTab.Image;
+        await QueueCoverImageLoad();
+    }
+
+    private async Task ShowShelfTab()
+    {
+        _activeMedia = MediaTab.Shelf;
+        await QueueShelfImageLoad();
+    }
+
+    private async Task OnShelfImageLoaded()
+    {
+        var elapsed = DateTime.UtcNow - _shelfLoadingStartedAt;
+        var remaining = TimeSpan.FromMilliseconds(900) - elapsed;
+        if (remaining > TimeSpan.Zero)
+        {
+            await Task.Delay(remaining);
+        }
+
+        _shelfImageVisible = true;
+        await JS.InvokeVoidAsync("ormanDesigner.setAllMapRatios");
+    }
+
+    private async Task OnCoverImageLoaded()
+    {
+        var elapsed = DateTime.UtcNow - _coverLoadingStartedAt;
+        var remaining = TimeSpan.FromMilliseconds(900) - elapsed;
+        if (remaining > TimeSpan.Zero)
+        {
+            await Task.Delay(remaining);
+        }
+
+        _coverImageVisible = true;
+    }
+
+    private async Task QueueCoverImageLoad()
+    {
+        _coverImageVisible = true;
+        _coverLoadingStartedAt = DateTime.UtcNow;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task QueueShelfImageLoad()
+    {
+        _shelfImageVisible = false;
+        _shelfImageRequested = false;
+        _shelfLoadingStartedAt = DateTime.UtcNow;
+        await InvokeAsync(StateHasChanged);
+        await Task.Delay(150);
+        _shelfImageRequested = true;
+    }
+
+    private void ToggleEditMode()
+    {
+        _editMode = !_editMode;
+        if (_editMode)
+        {
+            PrepareEditModel();
+        }
+    }
+
+    private async Task SaveEdit()
+    {
+        if (_selectedBook is null || _editBook is null)
+        {
+            return;
+        }
+
+        using var http = new HttpClient { BaseAddress = new Uri(Navigation.BaseUri) };
+        var response = await http.PostAsJsonAsync($"/books/{_selectedBook.Id}", new
+        {
+            Naslov = _editBook.Title,
+            PrimedbaNaslov = _editBook.TitleNote,
+            IzdavacId = _editBook.PublisherId,
+            Godina = _editBook.Year,
+            BrojStrana = _editBook.PageCount,
+            BrojTomova = _editBook.VolumeCount,
+            Sirina = _editBook.Width,
+            Visina = _editBook.Height,
+            Debljina = _editBook.Thickness,
+            Isbn = _editBook.Isbn,
+            PrimedbaKnjiga = _editBook.BookNote,
+            Prevod = _editBook.Prevod,
+            DomaciAutor = _editBook.DomaciAutor,
+            StraniAutor = _editBook.StraniAutor,
+            TvrdiPovez = _editBook.TvrdiPovez,
+            KnjigaId = _selectedBook.InventoryId ?? _selectedBook.Id,
+            JezikId = FirstSelectedId(_editLanguageIds),
+            OriginalniJezikId = FirstSelectedId(_editOriginalLanguageIds),
+            PismoId = FirstSelectedId(_editScriptIds),
+            KategorijaIds = _editCategoryIds.OrderBy(id => id).ToList(),
+            JezikIds = _editLanguageIds.OrderBy(id => id).ToList(),
+            JezikOrigIds = _editOriginalLanguageIds.OrderBy(id => id).ToList(),
+            PismoIds = _editScriptIds.OrderBy(id => id).ToList()
+        });
+
+        if (!response.IsSuccessStatusCode)
+        {
+            Snackbar.Configuration.VisibleStateDuration = 3000;
+            Snackbar.Add("Izmene nisu sacuvane", Severity.Error);
+            return;
+        }
+
+        var savedId = _selectedBook.InventoryId ?? _selectedBook.Id;
+        _editMode = false;
+        await SetSelectedBook(_selectedBook.Id);
+
+        Snackbar.Configuration.VisibleStateDuration = 3000;
+        Snackbar.Add($"Knjiga id: {savedId} uspesno sacuvana", Severity.Success);
+    }
+
+    private static int? FirstSelectedId(HashSet<int> ids) => ids.OrderBy(id => id).Cast<int?>().FirstOrDefault();
+
+    private void PrepareEditModel()
+    {
+        if (_selectedBook is null)
+        {
+            _editBook = null;
+            return;
+        }
+
+        _editBook = new BookEditModel
+        {
+            Title = _selectedBook.Title,
+            TitleNote = _selectedBook.TitleNote,
+            PublisherId = _selectedBook.PublisherId,
+            Year = ToNullableInt(_selectedBook.Year),
+            PageCount = ToNullableInt(_selectedBook.PageCount),
+            VolumeCount = ToNullableInt(_selectedBook.VolumeCount),
+            Width = ToNullableInt(_selectedBook.Width),
+            Height = ToNullableInt(_selectedBook.Height),
+            Thickness = ToNullableInt(_selectedBook.Thickness),
+            Isbn = _selectedBook.Isbn,
+            BookNote = _selectedBook.BookNote,
+            Prevod = _selectedBook.Prevod ?? false,
+            DomaciAutor = _selectedBook.DomaciAutor ?? false,
+            StraniAutor = _selectedBook.StraniAutor ?? false,
+            TvrdiPovez = _selectedBook.TvrdiPovez ?? false
+        };
+        _editCategoryIds = _selectedCategoryIds.ToHashSet();
+        _editLanguageIds = _selectedLanguageIds.ToHashSet();
+        _editOriginalLanguageIds = _selectedOriginalLanguageIds.ToHashSet();
+        _editScriptIds = _selectedScriptIds.ToHashSet();
+    }
+
+    private RenderFragment Selector(string label, string placeholder, List<NamedItem> items, HashSet<int> selectedIds, Action<int> onToggle) => @<label class="edit-row selector-row">
+        <span>@label:</span>
+        <div class="item-selector">
+            <div class="selected-items">
+                @foreach (var item in items.Where(item => selectedIds.Contains(item.Id)))
+                {
+                    <button class="selected-chip" type="button" @onclick="() => onToggle(item.Id)">@item.Name <span>x</span></button>
+                }
+            </div>
+            <select class="selector-select" value="" @onchange="args => SelectSelectorItem(args, onToggle)">
+                <option value="">@placeholder</option>
+                @foreach (var item in items.Where(item => !selectedIds.Contains(item.Id)))
+                {
+                    <option value="@item.Id">@item.Name</option>
+                }
+            </select>
+        </div>
+    </label>;
+
+    private void SelectSelectorItem(ChangeEventArgs args, Action<int> onToggle)
+    {
+        if (int.TryParse(StringValue(args), out var id))
+        {
+            onToggle(id);
+        }
+    }
+
+    private void ToggleEditLanguage(int id) => ToggleId(_editLanguageIds, id);
+    private void ToggleEditOriginalLanguage(int id) => ToggleId(_editOriginalLanguageIds, id);
+    private void ToggleEditScript(int id) => ToggleId(_editScriptIds, id);
+
+    private void ToggleEditCategory(int id, bool selected)
+    {
+        if (selected)
+        {
+            _editCategoryIds.Add(id);
+        }
+        else
+        {
+            _editCategoryIds.Remove(id);
+        }
+    }
+
+    private static void ToggleId(HashSet<int> ids, int id)
+    {
+        if (!ids.Add(id))
+        {
+            ids.Remove(id);
+        }
+    }
+
+    private async Task<HashSet<int>> LoadRelationIds(string sql, int relationBookId, int? primaryId)
+    {
+        var rows = await Db.QueryAsync(sql, new { Id = relationBookId });
+        var ids = rows.Select(row => ToInt(row["id"])).ToHashSet();
+        if (primaryId is not null)
+        {
+            ids.Add(primaryId.Value);
+        }
+
+        return ids;
+    }
+
+    private async Task SetSelectedBook(int id)
+    {
+        var rows = await Db.QueryAsync(
+            @"
+            SELECT
+                k.id,
+                k.knjiga_id,
+                k.naslov,
+                k.primedba_naslov,
+                k.godina,
+                k.broj_strana,
+                k.broj_tomova,
+                k.sirina,
+                k.visina,
+                k.debljina,
+                k.prevod,
+                k.domaci_autor,
+                k.strani_autor,
+                k.tvrdi_povez,
+                k.isbn,
+                k.primedba_knjiga,
+                k.izdavac_id,
+                k.jezik_id,
+                k.originalni_jezik_id,
+                k.pismo_id,
+                i.naziv AS izdavac,
+                COALESCE(
+                    (SELECT GROUP_CONCAT(DISTINCT a2.ime ORDER BY a2.ime SEPARATOR ', ')
+                     FROM autorknjiga ak2
+                     INNER JOIN autor a2 ON a2.id = ak2.autor_id
+                     WHERE ak2.knjiga_id = k.knjiga_id),
+                    '(grupa autora)'
+                ) AS autor,
+                CONCAT_WS(', ',
+                    j.naziv,
+                    (SELECT GROUP_CONCAT(DISTINCT j2.naziv ORDER BY j2.naziv SEPARATOR ', ')
+                     FROM jezikknjiga jk
+                     INNER JOIN jezik j2 ON j2.id = jk.jezik_id
+                     WHERE jk.knjiga_id = k.knjiga_id
+                       AND (k.jezik_id IS NULL OR jk.jezik_id <> k.jezik_id))
+                ) AS jezik,
+                CONCAT_WS(', ',
+                    oj.naziv,
+                    (SELECT GROUP_CONCAT(DISTINCT oj2.naziv ORDER BY oj2.naziv SEPARATOR ', ')
+                     FROM jezikoriginalknjiga jok
+                     INNER JOIN jezik oj2 ON oj2.id = jok.jezik_original_id
+                     WHERE jok.knjiga_id = k.knjiga_id
+                       AND (k.originalni_jezik_id IS NULL OR jok.jezik_original_id <> k.originalni_jezik_id))
+                ) AS originalni_jezik,
+                CONCAT_WS(', ',
+                    p.naziv,
+                    (SELECT GROUP_CONCAT(DISTINCT p2.naziv ORDER BY p2.naziv SEPARATOR ', ')
+                     FROM pismoknjiga pk
+                     INNER JOIN pismo p2 ON p2.id = pk.pismo_id
+                     WHERE pk.knjiga_id = k.knjiga_id
+                       AND (k.pismo_id IS NULL OR pk.pismo_id <> k.pismo_id))
+                ) AS pismo,
+                pol.x AS shelf_x,
+                pol.y AS shelf_y,
+                pol.id AS shelf_id,
+                pol.orman_id AS cabinet_id,
+                o.naziv AS cabinet_name
+            FROM knjiga k
+            LEFT JOIN izdavac i ON i.id = k.izdavac_id
+            LEFT JOIN jezik j ON j.id = k.jezik_id
+            LEFT JOIN jezik oj ON oj.id = k.originalni_jezik_id
+            LEFT JOIN pismo p ON p.id = k.pismo_id
+            LEFT JOIN polica pol ON pol.id = k.polica_id
+            LEFT JOIN orman o ON o.id = pol.orman_id
+            WHERE k.id = @id
+            ",
+            new { id });
+
+        var row = rows.FirstOrDefault();
+        if (row is null)
+        {
+            return;
+        }
+
+        _selectedBook = BookView.From(row);
+        _coverImageVisible = true;
+        _shelfImageVisible = false;
+        _shelfImageRequested = false;
+        _selectedId = _selectedBook.InventoryId ?? _selectedBook.Id;
+        _selectedBookId = _selectedBook.Id;
+        _titleSearch = _books.FirstOrDefault(book => book.Id == _selectedBookId)?.Display ?? _selectedBook.Title;
+
+        var relationBookId = _selectedBook.InventoryId ?? _selectedBook.Id;
+        _selectedBook = _selectedBook with { Author = await LoadAuthorText(relationBookId) };
+        var categoryRows = await Db.QueryAsync("SELECT kategorija_id FROM kategorijaknjiga WHERE knjiga_id = @id", new { Id = relationBookId });
+        _selectedCategoryIds = categoryRows.Select(row => ToInt(row["kategorija_id"])).ToHashSet();
+        _selectedLanguageIds = await LoadRelationIds("SELECT jezik_id AS id FROM jezikknjiga WHERE knjiga_id = @id", relationBookId, _selectedBook.LanguageId);
+        _selectedOriginalLanguageIds = await LoadRelationIds("SELECT jezik_original_id AS id FROM jezikoriginalknjiga WHERE knjiga_id = @id", relationBookId, _selectedBook.OriginalLanguageId);
+        _selectedScriptIds = await LoadRelationIds("SELECT pismo_id AS id FROM pismoknjiga WHERE knjiga_id = @id", relationBookId, _selectedBook.ScriptId);
+        PrepareEditModel();
+
+        if (_activeMedia == MediaTab.Image)
+        {
+            await QueueCoverImageLoad();
+        }
+        else if (_activeMedia == MediaTab.Shelf)
+        {
+            await QueueShelfImageLoad();
+        }
+    }
+
+    private async Task SetSelectedBookByInventoryId(int inventoryId)
+    {
+        var rows = await Db.QueryAsync("SELECT id FROM knjiga WHERE knjiga_id = @knjiga_id ORDER BY id LIMIT 1", new { KnjigaId = inventoryId });
+        var row = rows.FirstOrDefault();
+        if (row is null)
+        {
+            _selectedId = inventoryId;
+            return;
+        }
+
+        await SetSelectedBook(ToInt(row["id"]));
+    }
+
+    private async Task<string> LoadAuthorText(int relationBookId)
+    {
+        var rows = await Db.QueryAsync(
+            @"
+            SELECT GROUP_CONCAT(DISTINCT a.ime ORDER BY a.ime SEPARATOR ', ') AS autor
+            FROM autorknjiga ak
+            INNER JOIN autor a ON a.id = ak.autor_id
+            WHERE ak.knjiga_id = @relation_book_id
+            ",
+            new { RelationBookId = relationBookId });
+
+        return ToStringValue(rows.FirstOrDefault()?["autor"]) is { Length: > 0 } author
+            ? author
+            : "(grupa autora)";
+    }
+
+    private static string Text(object? value) => value switch
+    {
+        null => "",
+        decimal number => number.ToString("0.##", CultureInfo.InvariantCulture),
+        _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? ""
+    };
+
+    private static string ToStringValue(object? value) => WebUtility.HtmlDecode(Convert.ToString(value, CultureInfo.InvariantCulture) ?? "");
+    private static string StringValue(ChangeEventArgs args) => Convert.ToString(args.Value, CultureInfo.InvariantCulture) ?? "";
+    private static int ToInt(object? value) => Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    private static int? NullableInt(ChangeEventArgs args) => int.TryParse(StringValue(args), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) ? value : null;
+    private static int? PositiveInt(ChangeEventArgs args)
+    {
+        if (!int.TryParse(StringValue(args), NumberStyles.Integer, CultureInfo.InvariantCulture, out var value))
+        {
+            return null;
+        }
+
+        return Math.Max(1, value);
+    }
+    private static bool BoolValue(ChangeEventArgs args) => args.Value is bool value && value;
+    private static int? ToNullableInt(object? value) => value is null ? null : Convert.ToInt32(value, CultureInfo.InvariantCulture);
+    private static bool? ToBool(object? value) => value is null ? null : Convert.ToBoolean(value, CultureInfo.InvariantCulture);
+    private static int PageCount(int count) => Math.Max(1, (int)Math.Ceiling(count / (double)DropdownPageSize));
+    private static IEnumerable<BookChoice> PageBooks(List<BookChoice> books, int page) => books.Skip((Math.Max(1, page) - 1) * DropdownPageSize).Take(DropdownPageSize);
+    private static List<BookChoice> FilterAuthorBooks(IEnumerable<BookChoice> books, string search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return books.ToList();
+        }
+
+        return books
+            .Where(book => book.Author.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static List<BookChoice> FilterTitleBooks(IEnumerable<BookChoice> books, string search)
+    {
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return books.ToList();
+        }
+
+        return books
+            .Where(book => book.Title.Contains(search, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+    }
+
+    private static List<BookChoice> SortBooks(IEnumerable<BookChoice> books, string column, bool ascending)
+    {
+        Func<BookChoice, string> selector = column == "author" ? book => book.Author : book => book.Title;
+        var sorted = ascending
+            ? books.OrderBy(selector, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase)
+            : books.OrderByDescending(selector, StringComparer.CurrentCultureIgnoreCase).ThenBy(book => book.Title, StringComparer.CurrentCultureIgnoreCase);
+
+        return sorted.ToList();
+    }
+
+    private static string SortIndicator(string activeColumn, bool ascending, string column) =>
+        activeColumn == column ? (ascending ? "^" : "v") : "";
+    private static string ShelfStyle(ShelfPosition shelf)
+    {
+        return $"left: calc(var(--orman-scale, 1) * {shelf.X}px); top: calc(var(--orman-scale, 1) * {shelf.Y}px);";
+    }
+    private static string ShortCategoryName(string name) => name switch
+    {
+        "Anglosaksonska literatura" => "Anglosakson. lit.",
+        "Masena spektrometrija" => "Masena spektrom.",
+        "Enciklopedija, rečnik" => "Enciklop., rečnik",
+        "Instrumentalne metode" => "Instrum. metode",
+        "Hemijska tehnologija" => "Hem. tehnologija",
+        "Francuska literatura" => "Francuska lit.",
+        _ => name
+    };
+
+    private sealed record NamedItem(int Id, string Name);
+    private sealed record BookChoice(int Id, string Title, int? InventoryId, string Author)
+    {
+        public string Display => InventoryId is null ? Title : $"{Title} ({InventoryId})";
+    }
+    private sealed record ShelfPosition(int Id, int X, int Y, int CabinetId);
+    private sealed class BookEditModel
+    {
+        public string Title { get; set; } = "";
+        public string TitleNote { get; set; } = "";
+        public int? PublisherId { get; set; }
+        public int? Year { get; set; }
+        public int? PageCount { get; set; }
+        public int? VolumeCount { get; set; }
+        public int? Width { get; set; }
+        public int? Height { get; set; }
+        public int? Thickness { get; set; }
+        public string Isbn { get; set; } = "";
+        public string BookNote { get; set; } = "";
+        public bool Prevod { get; set; }
+        public bool DomaciAutor { get; set; }
+        public bool StraniAutor { get; set; }
+        public bool TvrdiPovez { get; set; }
+    }
+    private enum MediaTab
+    {
+        Image,
+        Shelf
+    }
+
+    private sealed record BookView(
+        int Id,
+        int? InventoryId,
+        string Title,
+        string Author,
+        string TitleNote,
+        int? PublisherId,
+        string Publisher,
+        int? LanguageId,
+        int? ScriptId,
+        int? OriginalLanguageId,
+        object? Year,
+        object? PageCount,
+        object? VolumeCount,
+        object? Width,
+        object? Height,
+        object? Thickness,
+        string Language,
+        string Script,
+        string OriginalLanguage,
+        string Isbn,
+        string BookNote,
+        bool? Prevod,
+        bool? DomaciAutor,
+        bool? StraniAutor,
+        bool? TvrdiPovez,
+        int? ShelfId,
+        int? ShelfX,
+        int? ShelfY,
+        int? CabinetId,
+        string CabinetName)
+    {
+        public string ImageUrl => $"/book-cover/{InventoryId ?? Id}";
+        public string CabinetImageUrl => CabinetId is null ? "" : $"/cabinet-image/{CabinetId}";
+
+        public static BookView From(Dictionary<string, object?> row) => new(
+            ToInt(row["id"]),
+            row["knjiga_id"] is null ? null : ToInt(row["knjiga_id"]),
+            ToStringValue(row["naslov"]),
+            ToStringValue(row["autor"]),
+            ToStringValue(row["primedba_naslov"]),
+            row["izdavac_id"] is null ? null : ToInt(row["izdavac_id"]),
+            ToStringValue(row["izdavac"]),
+            row["jezik_id"] is null ? null : ToInt(row["jezik_id"]),
+            row["pismo_id"] is null ? null : ToInt(row["pismo_id"]),
+            row["originalni_jezik_id"] is null ? null : ToInt(row["originalni_jezik_id"]),
+            row["godina"],
+            row["broj_strana"],
+            row["broj_tomova"],
+            row["sirina"],
+            row["visina"],
+            row["debljina"],
+            ToStringValue(row["jezik"]),
+            ToStringValue(row["pismo"]),
+            ToStringValue(row["originalni_jezik"]),
+            ToStringValue(row["isbn"]),
+            ToStringValue(row["primedba_knjiga"]),
+            ToBool(row["prevod"]),
+            ToBool(row["domaci_autor"]),
+            ToBool(row["strani_autor"]),
+            ToBool(row["tvrdi_povez"]),
+            row["shelf_id"] is null ? null : ToInt(row["shelf_id"]),
+            row["shelf_x"] is null ? null : ToInt(row["shelf_x"]),
+            row["shelf_y"] is null ? null : ToInt(row["shelf_y"]),
+            row["cabinet_id"] is null ? null : ToInt(row["cabinet_id"]),
+            ToStringValue(row["cabinet_name"]));
+    }
+}
