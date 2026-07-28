@@ -234,16 +234,15 @@
         _fileName = file.Name;
         _hasFile = true;
         _isLoading = true;
-        _uploadProgress = 0;
+        _uploadProgress = null;
         _pageIndex = 0;
         _errorMessage = null;
         _books = [];
 
         try
         {
-            using var callback = DotNetObjectReference.Create(this);
             var uploaded = await JS.InvokeAsync<CompletedBrowserUpload>(
-                "libraryAccessUpload.upload", _accessFileInput, callback);
+                "libraryAccessUpload.upload", _accessFileInput);
             _uploadedTempPath = uploaded.Path;
             _uploadId = uploaded.Id;
             _activeAccessPath = uploaded.Path;
@@ -264,12 +263,6 @@
         }
     }
 
-    [JSInvokable]
-    public Task ReportChunkUploadProgress(int progress)
-    {
-        _uploadProgress = Math.Clamp(progress, 0, 100);
-        return InvokeAsync(StateHasChanged);
-    }
 
     private async Task AddAllBooksToDatabase()
     {

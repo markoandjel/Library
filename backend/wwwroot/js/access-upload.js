@@ -17,7 +17,7 @@ window.libraryAccessUpload = {
         if (input) input.value = "";
     },
 
-    async upload(input, dotnetRef) {
+    async upload(input) {
         const file = input?.files?.[0];
         if (!file) throw new Error("Izaberite Access fajl.");
 
@@ -74,21 +74,6 @@ window.libraryAccessUpload = {
                 if (response?.ok) {
                     const state = await response.json();
                     offset = state.receivedBytes;
-                }
-                // Progress UI is optional: a closed/reconnecting Blazor circuit must not abort the upload.
-                if (dotnetRef) {
-                    try {
-                        await dotnetRef.invokeMethodAsync(
-                            "ReportChunkUploadProgress",
-                            Math.min(100, Math.floor(offset * 100 / Math.max(file.size, 1))));
-                    } catch (progressError) {
-                        console.warn("[Access import] Progress update nije uspeo; upload se nastavlja.", {
-                            uploadId: session.id,
-                            offset,
-                            error: progressError
-                        });
-                        dotnetRef = null;
-                    }
                 }
             }
 
