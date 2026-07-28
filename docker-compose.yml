@@ -25,6 +25,8 @@
   database:
     image: mysql:8.4
     command: --lower-case-table-names=1 --port=${MYSQL_PORT:-3306}
+    ports:
+      - "127.0.0.1:13368:${MYSQL_PORT:-3306}"
     environment:
       MYSQL_DATABASE: ${MYSQL_DATABASE:-library}
       MYSQL_USER: ${MYSQL_USER:-library}
