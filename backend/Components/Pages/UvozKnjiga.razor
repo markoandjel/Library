@@ -42,15 +42,10 @@
                 <MudText Class="import-status-value">@StatusText</MudText>
                 @if (_isLoading)
                 {
-                    @if (_uploadProgress is null)
-                    {
-                        <MudProgressLinear Color="Color.Primary" Indeterminate="true" />
-                    }
-                    else
-                    {
-                        <MudProgressLinear Color="Color.Primary" Value="@_uploadProgress.Value" />
-                        <MudText Class="import-status-value">Upload: @_uploadProgress.Value%</MudText>
-                    }
+                    <div class="access-upload-progress-wrap">
+                        <progress id="access-upload-progress" class="access-upload-progress" max="100" value="0"></progress>
+                        <span id="access-upload-progress-text" class="import-status-value">Priprema uploada...</span>
+                    </div>
                 }
             </div>
         </MudPaper>
@@ -166,7 +161,6 @@
     private string? _uploadId;
     private bool _hasFile;
     private bool _isLoading;
-    private int? _uploadProgress;
     private int? _savingBookId;
     private bool _bulkImporting;
     private int _bulkDone;
@@ -198,10 +192,6 @@
                 return $"Snimam knjigu id: {_savingBookId.Value} u bazu i otpremam korice...";
             }
 
-            if (_isLoading && _uploadProgress is not null)
-            {
-                return "Upload Access fajla je u toku...";
-            }
 
             if (_isLoading)
             {
@@ -234,11 +224,11 @@
         _fileName = file.Name;
         _hasFile = true;
         _isLoading = true;
-        _uploadProgress = null;
         _pageIndex = 0;
         _errorMessage = null;
         _books = [];
 
+        await InvokeAsync(StateHasChanged);
         var stage = "upload";
         try
         {
@@ -261,8 +251,7 @@
         finally
         {
             _isLoading = false;
-            _uploadProgress = null;
-        }
+            }
     }
 
 
@@ -617,11 +606,6 @@
         }
     }
 
-    private void ReportUploadProgress(int progress)
-    {
-        _uploadProgress = progress;
-        _ = InvokeAsync(StateHasChanged);
-    }
 
     private async Task ClearFile()
     {
@@ -631,7 +615,6 @@
         ClearStoredUpload();
         _hasFile = false;
         _isLoading = false;
-        _uploadProgress = null;
         _savingBookId = null;
         _bulkImporting = false;
         _bulkDone = 0;

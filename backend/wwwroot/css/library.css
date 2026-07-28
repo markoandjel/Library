@@ -208,3 +208,15 @@ body {
         grid-template-columns: repeat(2, minmax(130px, 1fr));
     }
 }
+
+.access-upload-progress-wrap {
+    display: grid;
+    gap: 7px;
+    margin-top: 8px;
+}
+
+.access-upload-progress {
+    width: 100%;
+    height: 10px;
+    accent-color: #1976d2;
+}

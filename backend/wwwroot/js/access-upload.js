@@ -17,6 +17,23 @@ window.libraryAccessUpload = {
         if (input) input.value = "";
     },
 
+    updateProgress(receivedBytes, totalBytes, processing = false) {
+        const progress = document.getElementById("access-upload-progress");
+        const text = document.getElementById("access-upload-progress-text");
+        if (!progress || !text) return;
+
+        if (processing) {
+            progress.removeAttribute("value");
+            text.textContent = "Upload zavrsen. Access fajl se obradjuje u containeru...";
+            return;
+        }
+
+        const percent = Math.min(100, Math.floor(receivedBytes * 100 / Math.max(totalBytes, 1)));
+        progress.value = percent;
+        const sentMb = (receivedBytes / 1024 / 1024).toFixed(1);
+        const totalMb = (totalBytes / 1024 / 1024).toFixed(1);
+        text.textContent = `Upload: ${percent}% (${sentMb} / ${totalMb} MB)`;
+    },
     async upload(input) {
         const file = input?.files?.[0];
         if (!file) throw new Error("Izaberite Access fajl.");
@@ -24,6 +41,7 @@ window.libraryAccessUpload = {
         const fileDetails = { fileName: file.name, fileSize: file.size };
         const chunkSize = 8 * 1024 * 1024;
         let session = null;
+        this.updateProgress(0, file.size);
 
         try {
             const startResponse = await fetch("/access-uploads", {
@@ -75,8 +93,10 @@ window.libraryAccessUpload = {
                     const state = await response.json();
                     offset = state.receivedBytes;
                 }
+                this.updateProgress(offset, file.size);
             }
 
+            this.updateProgress(file.size, file.size);
             const completeResponse = await fetch(`/access-uploads/${session.id}/complete`, { method: "POST" });
             if (!completeResponse.ok) {
                 const error = new Error(await this.errorText(completeResponse));
@@ -87,7 +107,9 @@ window.libraryAccessUpload = {
                 });
                 throw error;
             }
-            return await completeResponse.json();
+            const completed = await completeResponse.json();
+            this.updateProgress(file.size, file.size, true);
+            return completed;
         } catch (error) {
             this.logError("upload", error, { ...fileDetails, uploadId: session?.id });
             if (session?.id) {
