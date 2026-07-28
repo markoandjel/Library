@@ -18,6 +18,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents(options =>
     {
         options.DetailedErrors = builder.Environment.IsDevelopment();
+        options.JSInteropDefaultCallTimeout = TimeSpan.FromHours(2);
     });
 builder.Services.AddMudServices();
 builder.Services.AddEndpointsApiExplorer();

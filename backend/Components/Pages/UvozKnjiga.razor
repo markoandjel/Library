@@ -239,6 +239,7 @@
         _errorMessage = null;
         _books = [];
 
+        var stage = "upload";
         try
         {
             var uploaded = await JS.InvokeAsync<CompletedBrowserUpload>(
@@ -246,6 +247,7 @@
             _uploadedTempPath = uploaded.Path;
             _uploadId = uploaded.Id;
             _activeAccessPath = uploaded.Path;
+            stage = "preview";
             var existingIds = await LoadExistingBookIds();
             var books = await AccessImport.ReadPreviewFromPathAsync(uploaded.Path, existingIds, PreviewCount);
             _books = books.ToList();
@@ -253,7 +255,7 @@
         catch (Exception ex)
         {
             _errorMessage = ex.Message;
-            await LogBrowserError("preview", ex, _fileName);
+            await LogBrowserError(stage, ex, _fileName);
             ClearStoredUpload();
         }
         finally
