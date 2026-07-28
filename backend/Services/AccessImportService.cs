@@ -3,7 +3,7 @@ using System.Text.Json;
 using System.Net;
 using Microsoft.AspNetCore.Components.Forms;
 
-public sealed class AccessImportService(IWebHostEnvironment environment)
+public sealed class AccessImportService
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private const long MaxUploadBytes = 2_000_000_000;
@@ -25,10 +25,6 @@ public sealed class AccessImportService(IWebHostEnvironment environment)
         "Materijali", "Hemijska oprema", "Ruski"
     ];
 
-    public string DefaultAccessPath => Path.GetFullPath(Path.Combine(environment.ContentRootPath, "..", "KNJIGE.accdb"));
-
-    public Task<IReadOnlyList<AccessBookPreview>> ReadDefaultPreviewAsync(IReadOnlySet<int> existingBookIds, int count = 100) =>
-        ReadPreviewFromPathAsync(DefaultAccessPath, existingBookIds, count);
 
     public async Task<string> StoreUploadedFileAsync(
         IBrowserFile file,
@@ -69,8 +65,9 @@ public sealed class AccessImportService(IWebHostEnvironment environment)
     public Task<AccessBookImport?> ReadBookImportAsync(string path, int bookId) =>
         Task.Run(() => ReadBookImportFromPath(path, bookId));
 
-    public Task<AccessImage?> ReadDefaultCoverAsync(int bookId) =>
-        Task.Run(() => ReadCoverFromPath(DefaultAccessPath, bookId));
+    public Task<AccessImage?> ReadCoverAsync(string path, int bookId) =>
+        Task.Run(() => ReadCoverFromPath(path, bookId));
+
 
     private static async Task CopyUploadedFile(IBrowserFile file, string tempPath, Action<int>? reportUploadProgress)
     {

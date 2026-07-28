@@ -32,9 +32,6 @@
             </label>
 
             <div class="import-actions">
-                <MudButton Variant="Variant.Filled" Color="Color.Primary" Class="import-action-button" StartIcon="@Icons.Material.Filled.Storage" Disabled="@_isLoading" OnClick="LoadDefaultFile">
-                    Ucitaj KNJIGE.accdb
-                </MudButton>
                 <MudButton Variant="Variant.Outlined" Color="Color.Primary" Class="import-action-button" StartIcon="@Icons.Material.Filled.RestartAlt" Disabled="@(!_hasFile || _isLoading)" OnClick="ClearFile">
                     Ponisti
                 </MudButton>
@@ -99,7 +96,7 @@
                         else if (_books.Count == 0)
                         {
                             <tr>
-                                <td colspan="4" class="import-empty-row">Izaberite Access fajl ili ucitajte KNJIGE.accdb.</td>
+                                <td colspan="4" class="import-empty-row">Izaberite Access fajl za uvoz u container.</td>
                             </tr>
                         }
                         else
@@ -166,6 +163,7 @@
     private string? _fileName;
     private string? _activeAccessPath;
     private string? _uploadedTempPath;
+    private string? _uploadId;
     private bool _hasFile;
     private bool _isLoading;
     private int? _uploadProgress;
@@ -220,7 +218,7 @@
                 return $"Pronadjeno je {_books.Count} knjiga koje jos nisu u bazi.";
             }
 
-            return "Izaberite Access fajl ili ucitajte lokalni KNJIGE.accdb.";
+            return "Izaberite Access fajl za upload u container.";
         }
     }
 
@@ -247,6 +245,7 @@
             var uploaded = await JS.InvokeAsync<CompletedBrowserUpload>(
                 "libraryAccessUpload.upload", _accessFileInput, callback);
             _uploadedTempPath = uploaded.Path;
+            _uploadId = uploaded.Id;
             _activeAccessPath = uploaded.Path;
             var existingIds = await LoadExistingBookIds();
             var books = await AccessImport.ReadPreviewFromPathAsync(uploaded.Path, existingIds, PreviewCount);
@@ -255,6 +254,7 @@
         catch (Exception ex)
         {
             _errorMessage = ex.Message;
+            await LogBrowserError("preview", ex, _fileName);
             ClearStoredUpload();
         }
         finally
@@ -269,39 +269,6 @@
     {
         _uploadProgress = Math.Clamp(progress, 0, 100);
         return InvokeAsync(StateHasChanged);
-    }
-    private async Task LoadDefaultFile()
-    {
-        ClearStoredUpload();
-        _fileName = AccessImport.DefaultAccessPath;
-        _activeAccessPath = AccessImport.DefaultAccessPath;
-        _hasFile = true;
-        await LoadBooks(existingIds => AccessImport.ReadDefaultPreviewAsync(existingIds, PreviewCount));
-    }
-
-    private async Task LoadBooks(Func<IReadOnlySet<int>, Task<IReadOnlyList<AccessBookPreview>>> loader, bool useUploadProgress = false)
-    {
-        _isLoading = true;
-        _uploadProgress = useUploadProgress ? 0 : null;
-        _pageIndex = 0;
-        _errorMessage = null;
-        _books = [];
-
-        try
-        {
-            var existingIds = await LoadExistingBookIds();
-            var books = await loader(existingIds);
-            _books = books.ToList();
-        }
-        catch (Exception ex)
-        {
-            _errorMessage = ex.Message;
-        }
-        finally
-        {
-            _isLoading = false;
-            _uploadProgress = null;
-        }
     }
 
     private async Task AddAllBooksToDatabase()
@@ -451,6 +418,7 @@
         }
         catch (Exception ex)
         {
+            await LogBrowserError("save-book", ex, $"bookId={preview.Id}");
             Snackbar.Configuration.VisibleStateDuration = 5000;
             Snackbar.Add($"Knjiga id: {preview.Id} nije sacuvana: {ex.Message}", Severity.Error);
         }
@@ -603,7 +571,10 @@
             .ToHashSet();
     }
 
-    private string CoverUrl(AccessBookPreview book) => $"/access-book-cover/{book.Id}";
+    private string CoverUrl(AccessBookPreview book) =>
+        string.IsNullOrWhiteSpace(_uploadId)
+            ? "/images/book-placeholder.svg"
+            : $"/access-uploads/{_uploadId}/book-cover/{book.Id}";
 
     private void ShowCover(AccessBookPreview book, MouseEventArgs args)
     {
@@ -657,8 +628,9 @@
         _ = InvokeAsync(StateHasChanged);
     }
 
-    private void ClearFile()
+    private async Task ClearFile()
     {
+        await JS.InvokeVoidAsync("libraryAccessUpload.release", _accessFileInput);
         _fileName = null;
         _activeAccessPath = null;
         ClearStoredUpload();
@@ -678,8 +650,20 @@
     {
         AccessImportService.TryDelete(_uploadedTempPath);
         _uploadedTempPath = null;
+        _uploadId = null;
     }
 
+    private async Task LogBrowserError(string stage, Exception exception, string? details = null)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("libraryAccessUpload.logError", stage, exception.Message, new { details });
+        }
+        catch (JSDisconnectedException)
+        {
+            // Browser tab/circuit is already closed.
+        }
+    }
     private static int? FirstOrNull(IReadOnlyList<int> ids) => ids.Count == 0 ? null : ids[0];
 
     private static string? EmptyToNull(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -689,5 +673,5 @@
         ClearStoredUpload();
     }
     private sealed record BrowserUploadFile(string Name, long Size);
-    private sealed record CompletedBrowserUpload(string Path, string FileName, long Size);
+    private sealed record CompletedBrowserUpload(string Id, string Path, string FileName, long Size);
 }

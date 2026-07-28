@@ -142,9 +142,21 @@ app.MapPost("/access-uploads/{id}/complete", async Task<IResult> (string id) =>
     var completedPath = Path.Combine(root, $"{id}{extension}");
     File.Move(partPath, completedPath, true);
     File.Delete(metaPath);
-    return Results.Ok(new { path = completedPath, fileName = metadata.FileName, size = actualSize });
+    return Results.Ok(new { id, path = completedPath, fileName = metadata.FileName, size = actualSize });
 }).DisableAntiforgery().WithTags("access-import");
 
+app.MapDelete("/access-uploads/{id}", (string id) =>
+{
+    if (!Guid.TryParseExact(id, "N", out _))
+    {
+        return Results.BadRequest(new { error = "Neispravan upload ID." });
+    }
+
+    var root = AccessUploadRoot();
+    TryDeleteUploadFile(AccessUploadPartPath(root, id));
+    TryDeleteUploadFile(AccessUploadMetaPath(root, id));
+    return Results.NoContent();
+}).DisableAntiforgery().WithTags("access-import");
 app.MapGet("/book-cover/{bookId:int}", async Task<IResult> (int bookId, Db db, SftpImageService images, IWebHostEnvironment env) =>
 {
     var row = await db.SingleAsync(
@@ -165,16 +177,29 @@ app.MapGet("/book-cover/{bookId:int}", async Task<IResult> (int bookId, Db db, S
     return Results.File(placeholderPath, "image/svg+xml");
 }).WithTags("images");
 
-app.MapGet("/access-book-cover/{bookId:int}", async Task<IResult> (int bookId, AccessImportService accessImport, IWebHostEnvironment env) =>
+app.MapGet("/access-uploads/{id}/book-cover/{bookId:int}", async Task<IResult> (string id, int bookId, AccessImportService accessImport, IWebHostEnvironment env) =>
 {
-    var image = await accessImport.ReadDefaultCoverAsync(bookId);
+    if (!Guid.TryParseExact(id, "N", out _))
+    {
+        return Results.BadRequest(new { error = "Neispravan upload ID." });
+    }
+
+    var root = AccessUploadRoot();
+    var accessPath = new[] { ".accdb", ".mdb" }
+        .Select(extension => Path.Combine(root, id + extension))
+        .FirstOrDefault(File.Exists);
+    if (accessPath is null)
+    {
+        return Results.NotFound(new { error = "Uploadovani Access fajl nije pronadjen u containeru." });
+    }
+
+    var image = await accessImport.ReadCoverAsync(accessPath, bookId);
     if (image is not null)
     {
         return Results.File(image.Bytes, image.ContentType);
     }
 
-    var placeholderPath = Path.Combine(env.WebRootPath, "images", "book-placeholder.svg");
-    return Results.File(placeholderPath, "image/svg+xml");
+    return Results.File(Path.Combine(env.WebRootPath, "images", "book-placeholder.svg"), "image/svg+xml");
 }).WithTags("images");
 app.MapGet("/cabinet-image/{cabinetId:int}", async Task<IResult> (int cabinetId, Db db, SftpImageService images, IWebHostEnvironment env) =>
 {
@@ -210,6 +235,16 @@ static string AccessUploadRoot() =>
 
 static string AccessUploadPartPath(string root, string id) => Path.Combine(root, $"{id}.part");
 static string AccessUploadMetaPath(string root, string id) => Path.Combine(root, $"{id}.json");
+
+static void TryDeleteUploadFile(string path)
+{
+    try
+    {
+        if (File.Exists(path)) File.Delete(path);
+    }
+    catch (IOException) { }
+    catch (UnauthorizedAccessException) { }
+}
 
 static void MapNamedCrud(WebApplication app, string route, string tag, string table, string dbColumn, string apiProperty)
 {
