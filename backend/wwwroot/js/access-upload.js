@@ -1,4 +1,4 @@
-﻿window.libraryAccessUpload = {
+window.libraryAccessUpload = {
     logError(stage, error, details = {}) {
         console.error("[Access import]", {
             stage,
@@ -75,9 +75,21 @@
                     const state = await response.json();
                     offset = state.receivedBytes;
                 }
-                await dotnetRef.invokeMethodAsync(
-                    "ReportChunkUploadProgress",
-                    Math.min(100, Math.floor(offset * 100 / Math.max(file.size, 1))));
+                // Progress UI is optional: a closed/reconnecting Blazor circuit must not abort the upload.
+                if (dotnetRef) {
+                    try {
+                        await dotnetRef.invokeMethodAsync(
+                            "ReportChunkUploadProgress",
+                            Math.min(100, Math.floor(offset * 100 / Math.max(file.size, 1))));
+                    } catch (progressError) {
+                        console.warn("[Access import] Progress update nije uspeo; upload se nastavlja.", {
+                            uploadId: session.id,
+                            offset,
+                            error: progressError
+                        });
+                        dotnetRef = null;
+                    }
+                }
             }
 
             const completeResponse = await fetch(`/access-uploads/${session.id}/complete`, { method: "POST" });
